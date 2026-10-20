@@ -340,10 +340,22 @@ A failure that may pass (GitHub or Cove unreachable, a rate limit) keeps the rel
 1. On GitHub, **create a GitHub App** you own (Settings → Developer settings → GitHub Apps → New): any name; homepage URL `https://github.com/<you>`; **no webhook** (untick Active); repository permissions **Contents: Read and write** (Metadata: Read-only comes with it), nothing else; "Only on this account".
 2. On the App's page, note the **App ID** (a number; not the Client ID), and **generate a private key** (a `.pem` file).
 3. **Install the App** on the repositories whose Releases Lighthouse publishes ("Only select repositories"). A repository it isn't installed on is simply not published to.
-4. In Cove: `create LIGHTHOUSE_GITHUB_APP_SECRET <the whole .pem file>` (or the file in base64, if the shell can't take several lines). Then delete the `.pem` file.
+4. In Cove, store the whole `.pem` file, `-----BEGIN` and `-----END` lines included, **in base64** (Cove's `create` takes a value on one line; Lighthouse decodes it). On Windows, `[Convert]::ToBase64String([IO.File]::ReadAllBytes("<path>.pem")) | Set-Clipboard` copies it without showing it; then in `cove shell` (not a one-line `docker exec`, which lands in bash history): `create LIGHTHOUSE_GITHUB_APP_SECRET <paste>`. Clear the clipboard and delete the `.pem` file.
 5. In Lighthouse's `docker-compose.yml`, add `- GITHUB_APP_ID=<the App ID>` to `environment:` and release Lighthouse. `status` then shows `Publishing: on (GitHub App <id>)`.
 
 **What the App can do:** an installation token can write the contents of each repository it's installed on (Releases, but also files and branches; GitHub has no Releases-only permission), within the tag and branch rulesets on that repository. Lighthouse asks for a token for one repository at a time, valid an hour; the private key never leaves Cove and Lighthouse's memory and is never logged. If it leaks: generate a new key on the App's page, `update LIGHTHOUSE_GITHUB_APP_SECRET`, delete the old key there. Lighthouse reads the new one on its next attempt.
+
+### 4.8 Publish-only projects
+
+Some repositories get versions but aren't deployed: Go libraries (CoveClient, Ward), a browser extension (Crossframe). `add <url> --publish-only` watches one only to publish its GitHub Releases ([§4.7](#47-releases)).
+
+- **No compose file, no deploy, no containers.** Lighthouse never reads its compose file (it may have none) and never deploys it; the reconcile loop leaves it alone; `deploy`, `rollback`, `retry`, `check` and the container commands refuse it, and `all` skips it. `list` says `publish-only`, and so does `status`, which doesn't count it as missing.
+- **The baseline:** at its first check every existing tag is `known`, whatever its version, and a tag that already has a GitHub Release is recorded as `published` (adopted). Nothing old is published; `publish` backfills one by hand.
+- **Each new stable tag on `main` is published:** it goes straight from `ready` to `pending`, without a deploy. Unlike a deployed project, an older version line counts too (`v1.0.1` after `v1.1.0` is published, without taking "latest"). A tag not on `main` waits, as for any project; pre-releases stay `known`.
+- **Its Releases mean "I published this version"**, not "Lighthouse verified it running".
+- The kind is set when the project is added and can't be changed: `remove` it and `add` it again (its tags are then recorded as a new baseline).
+
+The GitHub App must be installed on the repository, as for any project whose Releases are published.
 
 ---
 
@@ -393,6 +405,7 @@ Lighthouse's state is in `lighthouse_db` on sparkdb, schema `lighthouse`. Roles,
 | `name` | The name in the CLI: letters, digits, `-`, `_`, up to 64. Unique without regard to case |
 | `repo_owner`, `repo_name` | `https://github.com/<owner>/<name>`; unique without regard to case |
 | `compose_project` | The compose project, as its compose file names it, learned at each deploy; unique, so two projects can't share one. Empty before the first deploy (the repository's name, lowercased, is used meanwhile) |
+| `kind` | `deploy`, or `publish` for a publish-only project ([§4.8](#48-publish-only-projects)); set when it's added (migration `00008`) |
 | `created_at`, `updated_at` | When Lighthouse started watching it; when it was last renamed or pointed elsewhere |
 | `deployed_sha`, `deployed_version`, `deployed_at` | The last **successful** deploy, and the release it was (release mode) |
 | `highest_version` | The highest release ever deployed successfully: checks only deploy a newer one |
@@ -603,10 +616,10 @@ Lighthouse's CLI follows the server's CLI conventions (clig.dev; modelled on Cov
 
 | Command | Usage | Notes |
 |---|---|---|
-| `list`, `ls`, `l` | `list` | Every project, newest deploy first (never deployed last): repository, what it deploys (commits or releases, and its tier), what runs (version and commit, or stopped), last deploy, last check; its last error, whether it's broken, tags waiting for `main` or moved, and no release yet |
+| `list`, `ls`, `l` | `list` | Every project, newest deploy first (never deployed last): repository, what it deploys (commits or releases, and its tier, or `publish-only`), what runs (version and commit, or stopped), last deploy, last check; its last error, whether it's broken, tags waiting for `main` or moved, and no release yet |
 | `releases` | `releases <name> [tag]` | A project's version tags, newest first: commit, status ([§4.7](#47-releases)), since when, and its Release, the last error and next attempt, or why. With a tag: the GitHub Release text it will get, and a warning when its CHANGELOG section or date is missing |
 | `publish` | `publish <name> <tag> [--date YYYY-MM-DD] [--notes-from <ref>] [--yes]` | Asks first. Publish an existing tag's GitHub Release now, without deploying it (a backfill, marked as not verified by a deploy); never takes "latest" from a newer version. A failed attempt is tried again later |
-| `add` | `add <url> [--name <name>]` | Named after the repository (lowercase). `--name` only when that name is taken; on a terminal `add` asks instead. Names: letters, digits, `-`, `_`, up to 64. The URL may have `www.`, a trailing `/` or `.git`. Deployed on the next check |
+| `add` | `add <url> [--name <name>] [--publish-only]` | Named after the repository (lowercase). `--name` only when that name is taken; on a terminal `add` asks instead. Names: letters, digits, `-`, `_`, up to 64. The URL may have `www.`, a trailing `/` or `.git`. Deployed on the next check; with `--publish-only`, never deployed, only its Releases published ([§4.8](#48-publish-only-projects)) |
 | `remove`, `rm` | `remove <name> [--keep] [--yes]` | Asks first. Stops watching it and removes its containers and networks (`docker compose down`); its data and images stay. `--keep` leaves the containers running, untracked |
 | `rename` | `rename <name> <new-name>` | Lighthouse's name only; repository and containers unchanged |
 | `set-url` | `set-url <name> <url>` | Watch another repository under the same name |
@@ -774,6 +787,8 @@ A new password is generated straight into its URL on the server, and `setup.sql`
 3. If it keeps data on the host: create `/srv/server/storage/<compose project>/` (owned by the user its image runs as, if not root).
 4. `lh add https://github.com/LSariol/<Repo>`, then `lh scan` (or wait for the next check). Watch `docker logs -f lighthouse`.
 5. Check: `lh status` shows its services running; `history <one of its keys>` in Cove shows `lighthouse`.
+
+**A publish-only project** (a library; [§4.8](#48-publish-only-projects)): install the GitHub App on the repository, `lh add <url> --publish-only`, and after the next check `lh releases <name>` shows its tags as `known` (or `published`, for ones that already have a Release). Its next version tag on `main` gets a Release.
 
 ### Removing a project
 
@@ -957,6 +972,7 @@ These rules apply to every change, on every project on the server. They come fro
   | `00005_held_commit` | `projects.held_sha`: the commit a rollback went back from, which checks don't redeploy |
   | `00006_releases` | `releases` (read, add and update for the app) and `projects.releases_tracked_at` ([§4.7](#47-releases)); `deployments`: the `retry` trigger |
   | `00007_publishing` | `releases`: publishing attempts, the Release's URL, backfills |
+  | `00008_publish_only` | `projects.kind`: `deploy` or `publish` ([§4.8](#48-publish-only-projects)) |
 
   `lighthouse migrate status` lists them with the time each was applied.
 

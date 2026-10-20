@@ -27,11 +27,14 @@ func Handler(svc Service) http.Handler {
 		respond(w, projects, err)
 	})
 	mux.HandleFunc("POST /v1/projects", func(w http.ResponseWriter, r *http.Request) {
-		var body struct{ Name, URL string }
+		var body struct {
+			Name, URL   string
+			PublishOnly bool
+		}
 		if !decode(w, r, &body) {
 			return
 		}
-		project, err := svc.Add(r.Context(), body.Name, body.URL)
+		project, err := svc.Add(r.Context(), body.Name, body.URL, body.PublishOnly)
 		respond(w, project, err)
 	})
 	mux.HandleFunc("DELETE /v1/projects/{name}", func(w http.ResponseWriter, r *http.Request) {

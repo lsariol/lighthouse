@@ -41,7 +41,18 @@ type Project struct {
 	Stopped bool
 
 	ReleasesTracked bool // its existing version tags were recorded (the baseline)
+
+	Kind string // KindDeploy, or KindPublish for a project Lighthouse only publishes Releases for
 }
+
+// What Lighthouse does with a project.
+const (
+	KindDeploy  = "deploy"  // deploys it, and publishes Releases if it deploys releases
+	KindPublish = "publish" // publishes a Release for each new version tag; never deploys it
+)
+
+// PublishOnly reports whether Lighthouse only publishes p's Releases.
+func (p Project) PublishOnly() bool { return p.Kind == KindPublish }
 
 // ComposeName is p's compose project: as last deployed, else the repository's name.
 func (p Project) ComposeName() string {
@@ -205,6 +216,8 @@ type Store interface {
 	Get(ctx context.Context, name string) (Project, error)
 
 	Add(ctx context.Context, name string, repo github.Repo) (Project, error)
+	// AddPublishOnly adds a project of KindPublish, as Add does.
+	AddPublishOnly(ctx context.Context, name string, repo github.Repo) (Project, error)
 	Remove(ctx context.Context, name string) error
 	Rename(ctx context.Context, name string, newName string) error
 	SetRepo(ctx context.Context, name string, repo github.Repo) error

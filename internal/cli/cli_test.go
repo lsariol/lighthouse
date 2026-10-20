@@ -47,13 +47,16 @@ func (f *fakeService) Projects(ctx context.Context) ([]control.Project, error) {
 
 // Add names a project after the repository when name is "", and refuses a
 // name that's taken, as the daemon does.
-func (f *fakeService) Add(ctx context.Context, name, url string) (control.Project, error) {
+func (f *fakeService) Add(ctx context.Context, name, url string, publishOnly bool) (control.Project, error) {
 	if name == "" {
 		name = url[strings.LastIndex(url, "/")+1:]
 	}
 	if slices.ContainsFunc(f.projects, func(p control.Project) bool { return p.Name == name }) {
 		f.calls = append(f.calls, "add "+name+" (taken)")
 		return control.Project{}, control.Errorf(control.KindNameTaken, "A project named %q already exists.", name)
+	}
+	if publishOnly {
+		return control.Project{Name: name, URL: url, Kind: "publish"}, f.act("add --publish-only", name)
 	}
 	return control.Project{Name: name, URL: url, ComposeProject: name}, f.act("add", name)
 }
@@ -384,6 +387,34 @@ func TestPublish(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "v1.2.0") {
 		t.Errorf("one passing failure needs attention: %v", err)
+	}
+}
+
+func TestPublishOnlyProjects(t *testing.T) {
+	svc := newFake()
+	_, errOut, err := run(t, svc, "add https://github.com/LSariol/coveclient --publish-only")
+	if err != nil || svc.calls[0] != "add --publish-only coveclient" || !strings.Contains(errOut, `✓ Publishing "coveclient"'s GitHub Releases`) ||
+		!strings.Contains(errOut, "GitHub App must be installed") {
+		t.Errorf("add --publish-only: %v, calls %v\n%s", err, svc.calls, errOut)
+	}
+
+	svc = newFake("cove", "coveclient")
+	svc.projects[1].Kind, svc.projects[1].State, svc.projects[1].NoRelease = "publish", "publish-only", true
+	svc.projects[1].Services = nil
+	out, errOut, _ := run(t, svc, "list")
+	if !strings.Contains(out, "publish-only") || !strings.Contains(errOut, `"coveclient" publishes releases but has no version tag yet`) {
+		t.Errorf("list:\n%s%s", out, errOut)
+	}
+
+	svc.status.Projects = svc.projects
+	svc.status.Projects[1].NoRelease = false
+	if out, _, err := run(t, svc, "status"); err != nil || !strings.Contains(out, "publish-only") {
+		t.Errorf("status with a publish-only project = %v\n%s", err, out)
+	}
+
+	svc.calls = nil
+	if _, _, err := run(t, svc, "restart all --yes"); err != nil || strings.Join(svc.calls, ",") != "restart cove" {
+		t.Errorf("restart all: %v, calls %v", err, svc.calls)
 	}
 }
 

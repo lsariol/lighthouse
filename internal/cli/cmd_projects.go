@@ -26,11 +26,14 @@ func (c *CLI) list(ctx context.Context, args []string) error {
 
 	rows := [][]string{{"NAME", "REPOSITORY", "DEPLOYS", "RUNNING", "DEPLOYED", "CHECKED"}}
 	for _, p := range projects {
-		running := deployed(p.Version, p.Commit)
+		running, deploys := deployed(p.Version, p.Commit), follows(p.Mode, p.Tier)
 		if p.Stopped {
 			running += ", stopped"
 		}
-		rows = append(rows, []string{p.Name, p.URL, follows(p.Mode, p.Tier), running, formatTime(p.LastDeployed), formatTime(p.LastChecked)})
+		if p.Kind == "publish" {
+			running, deploys = "-", "publish-only"
+		}
+		rows = append(rows, []string{p.Name, p.URL, deploys, running, formatTime(p.LastDeployed), formatTime(p.LastChecked)})
 	}
 	table(rows)
 	info(fmt.Sprintf("%d %s", len(projects), plural(len(projects), "project", "projects")))
@@ -64,14 +67,15 @@ func newestDeployFirst(a, b control.Project) int {
 }
 
 func (c *CLI) add(ctx context.Context, args []string) error {
-	const form = "add <url> [--name <name>]"
-	name, rest, err := takeValue(args[1:], "--name")
+	const form = "add <url> [--name <name>] [--publish-only]"
+	publishOnly, rest := takeFlag(args[1:], "--publish-only")
+	name, rest, err := takeValue(rest, "--name")
 	if err != nil || len(rest) != 1 {
 		return usageError{form: form}
 	}
 	url := rest[0]
 
-	project, err := c.svc.Add(ctx, name, url)
+	project, err := c.svc.Add(ctx, name, url, publishOnly)
 
 	var ce *control.Error
 	for name == "" && errors.As(err, &ce) && ce.Kind == control.KindNameTaken {
@@ -84,12 +88,17 @@ func (c *CLI) add(ctx context.Context, args []string) error {
 			info("Add cancelled.")
 			return nil
 		}
-		project, err = c.svc.Add(ctx, answer, url)
+		project, err = c.svc.Add(ctx, answer, url, publishOnly)
 	}
 	if err != nil {
 		return err
 	}
 
+	if publishOnly {
+		success(fmt.Sprintf("Publishing %q's GitHub Releases (%s); it's never deployed. Its tags so far are left as they are; each new version tag on main gets a Release.", project.Name, project.URL))
+		info(fmt.Sprintf("The GitHub App must be installed on the repository. \"releases %s\" shows its tags after the next check.", project.Name))
+		return nil
+	}
 	success(fmt.Sprintf("Watching %q (%s). It deploys on the next check; \"scan\" checks now.", project.Name, project.URL))
 	info("What the repository needs: \"help setup\".")
 	return nil

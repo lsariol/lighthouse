@@ -2,6 +2,17 @@
 
 All notable changes to Lighthouse. Versions follow [semantic versioning](https://semver.org).
 
+## v1.2.0 (unreleased)
+
+Lighthouse publishes Releases for repositories it doesn't deploy, such as Go libraries.
+
+### Added
+- **Publish-only projects:** `add <url> --publish-only` (DOCUMENTATION.md §4.8). Each new stable version tag on `main` gets a GitHub Release, with no compose file, deploy or containers. `deploy`, `rollback`, `retry`, `check` and the container commands refuse such a project, `all` skips it, and `status` doesn't count it as missing.
+- **Existing Releases are adopted at the baseline:** when Lighthouse first records a project's tags, one that already has a GitHub Release shows as `published` in `releases`.
+
+### Changed
+- DOCUMENTATION.md §4.7: the GitHub App's key goes into Cove in base64, since Cove's `create` takes one line.
+
 ## v1.1.0 (2026-10-20)
 
 Lighthouse publishes a GitHub Release for each version it deploys and verifies, through a GitHub App you own.

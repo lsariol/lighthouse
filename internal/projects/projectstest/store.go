@@ -59,6 +59,14 @@ func (s *Store) Get(ctx context.Context, name string) (projects.Project, error) 
 }
 
 func (s *Store) Add(ctx context.Context, name string, repo github.Repo) (projects.Project, error) {
+	return s.add(name, repo, projects.KindDeploy)
+}
+
+func (s *Store) AddPublishOnly(ctx context.Context, name string, repo github.Repo) (projects.Project, error) {
+	return s.add(name, repo, projects.KindPublish)
+}
+
+func (s *Store) add(name string, repo github.Repo, kind string) (projects.Project, error) {
 	if err := projects.ValidateName(name); err != nil {
 		return projects.Project{}, err
 	}
@@ -70,7 +78,7 @@ func (s *Store) Add(ctx context.Context, name string, repo github.Repo) (project
 	if s.repoIndex(repo) >= 0 {
 		return projects.Project{}, projects.ErrRepoWatched
 	}
-	p := projects.Project{Name: name, Repo: repo, CreatedAt: time.Now(), Mode: "branch", Tier: "app"}
+	p := projects.Project{Name: name, Repo: repo, CreatedAt: time.Now(), Mode: "branch", Tier: "app", Kind: kind}
 	s.projects = append(s.projects, p)
 	return p, nil
 }

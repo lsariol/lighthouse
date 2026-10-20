@@ -93,6 +93,7 @@ func (c *CLI) status(ctx context.Context, args []string) error {
 			switch {
 			case p.Stopped:
 				state = "stopped on purpose"
+			case p.State == "publish-only":
 			case p.State != "running":
 				problems = append(problems, fmt.Sprintf("%q is %s", p.Name, p.State))
 			}

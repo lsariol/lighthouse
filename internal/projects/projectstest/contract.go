@@ -367,6 +367,27 @@ func RunStoreTests(t *testing.T, open func(t *testing.T) projects.Store) {
 		}
 	})
 
+	t.Run("PublishOnly", func(t *testing.T) {
+		s := open(t)
+		p, err := s.AddPublishOnly(ctx, "coveclient", github.Repo{Owner: "LSariol", Name: "CoveClient"})
+		if err != nil || p.Kind != projects.KindPublish || !p.PublishOnly() {
+			t.Fatalf("AddPublishOnly = %+v, %v", p, err)
+		}
+		if got, _ := s.Get(ctx, "coveclient"); !got.PublishOnly() {
+			t.Errorf("Get: kind %q", got.Kind)
+		}
+		s.Add(ctx, "cove", cove)
+		if got, _ := s.Get(ctx, "cove"); got.Kind != projects.KindDeploy || got.PublishOnly() {
+			t.Errorf("a project added with Add: kind %q", got.Kind)
+		}
+		if _, err := s.AddPublishOnly(ctx, "COVE", plop); !errors.Is(err, projects.ErrNameTaken) {
+			t.Errorf("AddPublishOnly with a taken name = %v", err)
+		}
+		if _, err := s.AddPublishOnly(ctx, "bad name", plop); !errors.Is(err, projects.ErrInvalidName) {
+			t.Errorf("AddPublishOnly with an invalid name = %v", err)
+		}
+	})
+
 	t.Run("Publishing", func(t *testing.T) {
 		s := open(t)
 		s.Add(ctx, "cove", cove)

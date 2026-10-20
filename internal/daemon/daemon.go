@@ -146,6 +146,10 @@ func (d *Daemon) Status(ctx context.Context) (control.Status, error) {
 		return s, err
 	}
 	for i := range list {
+		if list[i].Kind == projects.KindPublish {
+			list[i].State = "publish-only"
+			continue
+		}
 		d.addServices(ctx, &list[i])
 	}
 	s.Projects = list
@@ -221,7 +225,7 @@ func (d *Daemon) Projects(ctx context.Context) ([]control.Project, error) {
 				stable = true
 			}
 		}
-		cp.NoRelease = p.Mode == settings.DeployReleases && p.ReleasesTracked && !stable
+		cp.NoRelease = (p.Mode == settings.DeployReleases || p.PublishOnly()) && p.ReleasesTracked && !stable
 		out = append(out, cp)
 	}
 	return out, nil
@@ -314,10 +318,11 @@ func toProject(p projects.Project) control.Project {
 		LastErrorAt:    p.LastErrorAt,
 		FailureCount:   p.FailureCount,
 		Broken:         p.Broken,
+		Kind:           p.Kind,
 	}
 }
 
-func (d *Daemon) Add(ctx context.Context, name string, url string) (control.Project, error) {
+func (d *Daemon) Add(ctx context.Context, name string, url string, publishOnly bool) (control.Project, error) {
 	store, _, err := d.parts()
 	if err != nil {
 		return control.Project{}, err
@@ -330,7 +335,11 @@ func (d *Daemon) Add(ctx context.Context, name string, url string) (control.Proj
 	if !chosen {
 		name = projectName(repo.Name)
 	}
-	p, err := store.Add(ctx, name, repo)
+	add := store.Add
+	if publishOnly {
+		add = store.AddPublishOnly
+	}
+	p, err := add(ctx, name, repo)
 	switch {
 	case errors.Is(err, projects.ErrNameTaken) && !chosen:
 		other, _ := store.Get(ctx, name)
@@ -365,7 +374,7 @@ func (d *Daemon) Remove(ctx context.Context, name string, down bool) error {
 	if err != nil {
 		return err
 	}
-	if down {
+	if down && !p.PublishOnly() {
 		dir := d.cfg.StagingPath
 		os.MkdirAll(dir, 0o755)
 		var out strings.Builder
@@ -484,6 +493,9 @@ func (d *Daemon) Check(ctx context.Context, name string) (control.Deployment, er
 	}
 	started := time.Now()
 	res, sha, err := o.Check(ctx, p.Name)
+	if errors.Is(err, orchestrator.ErrPublishOnly) {
+		return control.Deployment{}, publishOnlyError(p.Name)
+	}
 	if err != nil {
 		return control.Deployment{}, control.Errorf(control.KindInternal, "Checking %s failed: %v.", p.Name, err)
 	}
@@ -501,9 +513,18 @@ func (d *Daemon) Check(ctx context.Context, name string) (control.Deployment, er
 	return out, nil
 }
 
+// publishOnlyError refuses a command that deploys or runs containers for a
+// publish-only project.
+func publishOnlyError(name string) error {
+	return control.Errorf(control.KindInvalid, "%q is publish-only: Lighthouse publishes its GitHub Releases but never deploys it or runs containers for it. \"releases %s\" shows its tags.", name, name)
+}
+
 func deployError(name string, err error) error {
 	if err == nil {
 		return nil
+	}
+	if errors.Is(err, orchestrator.ErrPublishOnly) {
+		return publishOnlyError(name)
 	}
 	if errors.Is(err, orchestrator.ErrUpdating) {
 		return control.Errorf(control.KindConflict, "Lighthouse is updating itself right now: %s isn't deployed until that's done. \"docker logs -f %s\" shows it; try again in a minute.", name, deploy.HelperName)
@@ -635,6 +656,9 @@ func (d *Daemon) targets(ctx context.Context, target string) (projects.Project, 
 	p, err := d.find(ctx, name)
 	if err != nil {
 		return p, nil, err
+	}
+	if p.PublishOnly() {
+		return p, nil, publishOnlyError(p.Name)
 	}
 
 	all, err := d.containers.ProjectContainers(ctx, p.ComposeName())

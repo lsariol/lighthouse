@@ -132,7 +132,10 @@ func releaseWarnings(p control.Project) []string {
 			lines = append(lines, fmt.Sprintf("%q %s: %s.", p.Name, r.Tag, r.Note))
 		}
 	}
-	if p.NoRelease {
+	switch {
+	case p.NoRelease && p.Kind == "publish":
+		lines = append(lines, fmt.Sprintf("%q publishes releases but has no version tag yet: tag a commit on main (v1.0.0) and push the tag.", p.Name))
+	case p.NoRelease:
 		lines = append(lines, fmt.Sprintf("%q deploys releases but has no version tag yet: tag a commit on main (v1.0.0) and push the tag.", p.Name))
 	}
 	return lines

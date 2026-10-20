@@ -25,8 +25,8 @@ func (f *fakeService) Status(ctx context.Context) (Status, error) {
 func (f *fakeService) Projects(ctx context.Context) ([]Project, error) {
 	return []Project{{Name: "plop", URL: "https://github.com/LSariol/plop", ComposeProject: "plop"}}, nil
 }
-func (f *fakeService) Add(ctx context.Context, name, url string) (Project, error) {
-	f.record("add " + name + " " + url)
+func (f *fakeService) Add(ctx context.Context, name, url string, publishOnly bool) (Project, error) {
+	f.record(fmt.Sprintf("add %s %s publish=%v", name, url, publishOnly))
 	if name == "taken" {
 		return Project{}, Errorf(KindConflict, "A project named %q already exists.", name)
 	}
@@ -144,7 +144,7 @@ func TestRoundTrip(t *testing.T) {
 		t.Errorf("Projects = %+v, %v", projects, err)
 	}
 
-	p, err := c.Add(ctx, "new", "https://github.com/a/new")
+	p, err := c.Add(ctx, "new", "https://github.com/a/new", true)
 	if err != nil || p.Name != "new" {
 		t.Errorf("Add = %+v, %v", p, err)
 	}
@@ -197,7 +197,7 @@ func TestRoundTrip(t *testing.T) {
 		}
 	}
 
-	want := []string{"add new https://github.com/a/new", "logs plop", "report plop 2", "check plop", "history plop 5", "releases plop", "release notes plop v1.0.0-rc.1", "publish plop v0.9.0 2025-01-02 main", "rename plop plop2", "set-url plop https://github.com/a/b",
+	want := []string{"add new https://github.com/a/new publish=true", "logs plop", "report plop 2", "check plop", "history plop 5", "releases plop", "release notes plop v1.0.0-rc.1", "publish plop v0.9.0 2025-01-02 main", "rename plop plop2", "set-url plop https://github.com/a/b",
 		"retry plop", "start plop:web", "stop plop", "restart plop", "scan", "pause", "resume"}
 	if len(svc.calls) != len(want) {
 		t.Fatalf("calls = %v, want %v", svc.calls, want)
@@ -213,7 +213,7 @@ func TestErrorsKeepTheirKind(t *testing.T) {
 	c, _ := serve(t, &fakeService{})
 	ctx := context.Background()
 
-	_, err := c.Add(ctx, "taken", "https://github.com/a/b")
+	_, err := c.Add(ctx, "taken", "https://github.com/a/b", false)
 	var e *Error
 	if !errors.As(err, &e) || e.Kind != KindConflict || e.Message != `A project named "taken" already exists.` {
 		t.Errorf("Add error = %#v", err)

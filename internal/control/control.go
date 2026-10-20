@@ -13,10 +13,11 @@ type Service interface {
 	Status(ctx context.Context) (Status, error)
 	Projects(ctx context.Context) ([]Project, error)
 
-	// Add starts watching the repository at url. With name "", the project
-	// is named after the repository (lowercased); a clash is a
+	// Add starts watching the repository at url: to deploy it, or with
+	// publishOnly only to publish its GitHub Releases. With name "", the
+	// project is named after the repository (lowercased); a clash is a
 	// KindNameTaken error, and the caller can try again with a name.
-	Add(ctx context.Context, name string, url string) (Project, error)
+	Add(ctx context.Context, name string, url string, publishOnly bool) (Project, error)
 	// Remove stops watching a project; with down, its containers are
 	// stopped and removed too.
 	Remove(ctx context.Context, name string, down bool) error
@@ -98,6 +99,7 @@ type Project struct {
 	LastErrorAt    *time.Time      `json:"lastErrorAt,omitempty"`
 	FailureCount   int             `json:"failureCount,omitempty"`
 	Broken         bool            `json:"broken,omitempty"`
+	Kind           string          `json:"kind,omitempty"`         // "deploy", or "publish" for publish-only
 	OpenReleases   []Release       `json:"openReleases,omitempty"` // tags waiting or moved, and Releases failing to publish
 	NoRelease      bool            `json:"noRelease,omitempty"`    // deploys releases but has no version tag yet
 }

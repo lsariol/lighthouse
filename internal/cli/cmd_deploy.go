@@ -128,12 +128,18 @@ func allOrNothing(args []string) bool {
 	return len(args) == 1 || len(args) == 2 && strings.EqualFold(args[1], "all")
 }
 
-// eachProject runs fn for every watched project, reporting each one, and
-// fails if any failed.
+// eachProject runs fn for every watched project but publish-only ones,
+// reporting each one, and fails if any failed.
 func (c *CLI) eachProject(ctx context.Context, verb string, done string, fn func(context.Context, string) error) error {
-	projects, err := c.svc.Projects(ctx)
+	all, err := c.svc.Projects(ctx)
 	if err != nil {
 		return err
+	}
+	var projects []control.Project
+	for _, p := range all {
+		if p.Kind != "publish" {
+			projects = append(projects, p)
+		}
 	}
 	if len(projects) == 0 {
 		info("No projects are watched yet.")

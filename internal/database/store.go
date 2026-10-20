@@ -48,13 +48,13 @@ func constraintError(err error) error {
 
 const projectColumns = `name, repo_owner, repo_name, created_at, coalesce(compose_project, ''),
 	coalesce(deployed_sha, ''), coalesce(deployed_version, ''), coalesce(highest_version, ''), deployed_at, last_checked_at, check_count, coalesce(last_error, ''), last_error_at,
-	failure_count, coalesce(failing_sha, ''), broken, deploy_mode, tier, stopped, coalesce(held_sha, ''), releases_tracked_at IS NOT NULL`
+	failure_count, coalesce(failing_sha, ''), broken, deploy_mode, tier, stopped, coalesce(held_sha, ''), releases_tracked_at IS NOT NULL, kind`
 
 func scanProject(row pgx.Row) (projects.Project, error) {
 	var p projects.Project
 	err := row.Scan(&p.Name, &p.Repo.Owner, &p.Repo.Name, &p.CreatedAt, &p.ComposeProject,
 		&p.DeployedSHA, &p.DeployedVersion, &p.HighestVersion, &p.DeployedAt, &p.LastCheckedAt, &p.Checks, &p.LastError, &p.LastErrorAt,
-		&p.FailureCount, &p.FailingSHA, &p.Broken, &p.Mode, &p.Tier, &p.Stopped, &p.HeldSHA, &p.ReleasesTracked)
+		&p.FailureCount, &p.FailingSHA, &p.Broken, &p.Mode, &p.Tier, &p.Stopped, &p.HeldSHA, &p.ReleasesTracked, &p.Kind)
 	return p, err
 }
 
@@ -89,12 +89,20 @@ func (d *Database) Get(ctx context.Context, name string) (projects.Project, erro
 }
 
 func (d *Database) Add(ctx context.Context, name string, repo github.Repo) (projects.Project, error) {
+	return d.add(ctx, name, repo, projects.KindDeploy)
+}
+
+func (d *Database) AddPublishOnly(ctx context.Context, name string, repo github.Repo) (projects.Project, error) {
+	return d.add(ctx, name, repo, projects.KindPublish)
+}
+
+func (d *Database) add(ctx context.Context, name string, repo github.Repo, kind string) (projects.Project, error) {
 	if err := projects.ValidateName(name); err != nil {
 		return projects.Project{}, err
 	}
 	p, err := scanProject(d.pool.QueryRow(ctx,
-		`INSERT INTO lighthouse.projects (name, repo_owner, repo_name) VALUES ($1, $2, $3)
-		 RETURNING `+projectColumns, name, repo.Owner, repo.Name))
+		`INSERT INTO lighthouse.projects (name, repo_owner, repo_name, kind) VALUES ($1, $2, $3, $4)
+		 RETURNING `+projectColumns, name, repo.Owner, repo.Name, kind))
 	if err != nil {
 		return projects.Project{}, constraintError(err)
 	}

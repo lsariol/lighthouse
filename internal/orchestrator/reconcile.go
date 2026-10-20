@@ -28,7 +28,7 @@ func (o *Orchestrator) Reconcile(ctx context.Context) error {
 			return ctx.Err()
 		}
 		w := o.watchOf(p.Name)
-		if p.Stopped || p.DeployedSHA == "" {
+		if p.Stopped || p.DeployedSHA == "" || p.PublishOnly() {
 			w.downSince = time.Time{}
 			continue
 		}

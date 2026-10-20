@@ -227,6 +227,13 @@ func (o *Orchestrator) check(ctx context.Context, p projects.Project) error {
 	if p.Stopped || o.now().Before(w.nextAttempt) {
 		return nil
 	}
+	if p.PublishOnly() {
+		err := o.checkPublishOnly(ctx, p, w)
+		if err != nil {
+			o.wait(w, p.Name, err)
+		}
+		return o.record(ctx, p.Name, err, true)
+	}
 
 	t, ok, err := o.latest(ctx, &p, w)
 	switch {
@@ -248,16 +255,37 @@ func (o *Orchestrator) check(ctx context.Context, p projects.Project) error {
 	return o.record(ctx, p.Name, err, true)
 }
 
-// latest finds what p should run next; ok is false when nothing is new.
-func (o *Orchestrator) latest(ctx context.Context, p *projects.Project, w *watch) (target, bool, error) {
+// head is the newest commit on p's default branch, asked with the last ETag.
+func (o *Orchestrator) head(ctx context.Context, p *projects.Project, w *watch) (string, error) {
 	sha, etag, err := o.github.CheckCommit(ctx, p.Repo, o.gitToken, w.commitETag)
 	switch {
 	case errors.Is(err, github.ErrNotModified):
-		sha = w.head
+		return w.head, nil
 	case err != nil:
+		return "", err
+	}
+	w.head, w.commitETag = sha, etag
+	return sha, nil
+}
+
+// tags are p's tags, asked with the last ETag.
+func (o *Orchestrator) tags(ctx context.Context, p *projects.Project, w *watch) ([]github.Tag, error) {
+	tags, etag, err := o.github.Tags(ctx, p.Repo, o.gitToken, w.tagsETag)
+	switch {
+	case errors.Is(err, github.ErrNotModified):
+		return w.tags, nil
+	case err != nil:
+		return nil, err
+	}
+	w.tags, w.tagsETag = tags, etag
+	return tags, nil
+}
+
+// latest finds what p should run next; ok is false when nothing is new.
+func (o *Orchestrator) latest(ctx context.Context, p *projects.Project, w *watch) (target, bool, error) {
+	sha, err := o.head(ctx, p, w)
+	if err != nil {
 		return target{}, false, err
-	default:
-		w.head, w.commitETag = sha, etag
 	}
 
 	if w.settingsSHA != sha {
@@ -274,14 +302,9 @@ func (o *Orchestrator) latest(ctx context.Context, p *projects.Project, w *watch
 		return target{sha: sha}, true, nil
 	}
 
-	tags, etag, err := o.github.Tags(ctx, p.Repo, o.gitToken, w.tagsETag)
-	switch {
-	case errors.Is(err, github.ErrNotModified):
-		tags = w.tags
-	case err != nil:
+	tags, err := o.tags(ctx, p, w)
+	if err != nil {
 		return target{}, false, err
-	default:
-		w.tags, w.tagsETag = tags, etag
 	}
 	rows, err := o.trackTags(ctx, p, w, tags)
 	if err != nil {
@@ -321,7 +344,7 @@ func (o *Orchestrator) trackTags(ctx context.Context, p *projects.Project, w *wa
 			switch {
 			case v.Prerelease():
 				r.Status, r.Note = projects.ReleaseKnown, "a pre-release: not deployed or published automatically"
-			case deployedOne && !v.Newer(highest) && !p.ReleasesTracked:
+			case !p.ReleasesTracked && (p.PublishOnly() || deployedOne && !v.Newer(highest)):
 				r.Status, r.Note = projects.ReleaseKnown, "there before Lighthouse tracked releases"
 			case deployedOne && !v.Newer(highest):
 				r.Status, r.Note = projects.ReleaseSuperseded, "not newer than "+highest.Tag+", already deployed: versions only move forward"
@@ -361,6 +384,7 @@ func (o *Orchestrator) trackTags(ctx context.Context, p *projects.Project, w *wa
 	w.waitedHead = w.head
 
 	if len(added) > 0 || !p.ReleasesTracked {
+		baseline := !p.ReleasesTracked
 		if err := o.store.TrackReleases(ctx, p.Name, added); err != nil {
 			return nil, err
 		}
@@ -368,9 +392,87 @@ func (o *Orchestrator) trackTags(ctx context.Context, p *projects.Project, w *wa
 			slog.Info("new release tag", "project", p.Name, "tag", r.Tag, "status", r.Status, "note", r.Note)
 		}
 		p.ReleasesTracked = true
+		if baseline {
+			o.adopt(ctx, *p, added)
+		}
 		rows = append(rows, added...)
 	}
 	return rows, nil
+}
+
+// adopt marks the baseline's known tags that already have a GitHub Release
+// as published, so `releases` shows them; a failure only means they show as
+// known.
+func (o *Orchestrator) adopt(ctx context.Context, p projects.Project, baseline []projects.Release) {
+	if len(baseline) == 0 {
+		return
+	}
+	existing, err := o.github.Releases(ctx, p.Repo, o.gitToken)
+	if err != nil {
+		slog.Warn("existing GitHub Releases can't be listed; older tags show as known", "project", p.Name, "err", err)
+		return
+	}
+	urls := map[string]string{}
+	for _, rel := range existing {
+		if !rel.Draft {
+			urls[rel.Tag] = rel.URL
+		}
+	}
+	for i, r := range baseline {
+		url, ok := urls[r.Tag]
+		if r.Status != projects.ReleaseKnown || !ok {
+			continue
+		}
+		res := projects.Published{Status: projects.ReleasePublished, URL: url, At: o.now(), Note: "its Release already existed, so Lighthouse adopted it"}
+		if err := o.store.RecordPublish(ctx, p.Name, r.Tag, res); err != nil {
+			slog.Warn("adopting an existing Release failed; it shows as known", "project", p.Name, "tag", r.Tag, "err", err)
+			continue
+		}
+		baseline[i].Status, baseline[i].URL, baseline[i].Note = res.Status, url, res.Note
+	}
+}
+
+// checkPublishOnly tracks a publish-only project's tags and makes each new
+// stable release on the default branch pending; nothing is deployed.
+func (o *Orchestrator) checkPublishOnly(ctx context.Context, p projects.Project, w *watch) error {
+	if _, err := o.head(ctx, &p, w); err != nil {
+		return err
+	}
+	tags, err := o.tags(ctx, &p, w)
+	if err != nil {
+		return err
+	}
+	rows, err := o.trackTags(ctx, &p, w, tags)
+	if err != nil {
+		return err
+	}
+	queued := false
+	for _, r := range rows {
+		if _, stable := release.Parse(r.Tag); !stable || r.Status != projects.ReleaseReady {
+			continue
+		}
+		if err := o.store.SetReleaseStatus(ctx, p.Name, r.Tag, projects.ReleasePending, ""); err != nil {
+			return err
+		}
+		slog.Info("a release is due to be published", "project", p.Name, "tag", r.Tag)
+		queued = true
+	}
+	if queued {
+		o.wakePublisher()
+	}
+	return nil
+}
+
+// ErrPublishOnly means a command that deploys or runs containers was given a
+// publish-only project.
+var ErrPublishOnly = errors.New("Lighthouse only publishes its GitHub Releases: it isn't deployed")
+
+// deployable returns p, or ErrPublishOnly.
+func deployable(p projects.Project, err error) (projects.Project, error) {
+	if err == nil && p.PublishOnly() {
+		return p, ErrPublishOnly
+	}
+	return p, err
 }
 
 // Notes is what a tracked tag's GitHub Release would say.
@@ -494,7 +596,7 @@ func (o *Orchestrator) Deploy(ctx context.Context, name string, ref string) erro
 }
 
 func (o *Orchestrator) deployRef(ctx context.Context, name string, ref string, trigger string) error {
-	p, err := o.store.Get(ctx, name)
+	p, err := deployable(o.store.Get(ctx, name))
 	if err != nil {
 		return err
 	}
@@ -548,7 +650,7 @@ func (o *Orchestrator) hold(ctx context.Context, p projects.Project, t target, l
 // Rollback deploys again what ran before the current version: the newest
 // successful deploy of something else.
 func (o *Orchestrator) Rollback(ctx context.Context, name string) (string, error) {
-	p, err := o.store.Get(ctx, name)
+	p, err := deployable(o.store.Get(ctx, name))
 	if err != nil {
 		return "", err
 	}
@@ -616,7 +718,7 @@ var commitRef = regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
 
 // Check dry-runs the deploy's checks on the project's newest commit.
 func (o *Orchestrator) Check(ctx context.Context, name string) (deploy.Result, string, error) {
-	p, err := o.store.Get(ctx, name)
+	p, err := deployable(o.store.Get(ctx, name))
 	if err != nil {
 		return deploy.Result{}, "", err
 	}
@@ -647,6 +749,9 @@ func (o *Orchestrator) Check(ctx context.Context, name string) (deploy.Result, s
 
 // Retry clears a project's failures (and broken state) and deploys it now.
 func (o *Orchestrator) Retry(ctx context.Context, name string) error {
+	if _, err := deployable(o.store.Get(ctx, name)); err != nil {
+		return err
+	}
 	if err := o.store.ClearFailures(ctx, name); err != nil {
 		return err
 	}

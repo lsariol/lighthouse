@@ -127,7 +127,7 @@ func newDaemon(t *testing.T) (*Daemon, *fakeContainers, *fakeCompose, *projectst
 	d.Ready(store, orchestrator.New(store, fakeCommits{}, fakeDeployer{}, nil, "t"), fakeHealth{3, 3})
 
 	ctx := context.Background()
-	if _, err := d.Add(ctx, "personalWebsite", "https://github.com/lsariol/landing"); err != nil {
+	if _, err := d.Add(ctx, "personalWebsite", "https://github.com/lsariol/landing", false); err != nil {
 		t.Fatal(err)
 	}
 	store.SetComposeProject(ctx, "personalWebsite", "website")
@@ -167,6 +167,43 @@ func TestReleases(t *testing.T) {
 	}
 	if _, err := d.ReleaseNotes(ctx, "personalWebsite", "v3.0.0"); kind(err) != control.KindNotFound || !strings.Contains(err.Error(), "releases personalWebsite") {
 		t.Errorf("ReleaseNotes of an untracked tag = %v", err)
+	}
+}
+
+func TestPublishOnlyProject(t *testing.T) {
+	d, _, cmp, store := newDaemon(t)
+	ctx := context.Background()
+	p, err := d.Add(ctx, "", "https://github.com/LSariol/CoveClient", true)
+	if err != nil || p.Name != "coveclient" || p.Kind != projects.KindPublish {
+		t.Fatalf("Add --publish-only = %+v, %v", p, err)
+	}
+	store.TrackReleases(ctx, "coveclient", nil)
+
+	s, err := d.Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sp := range s.Projects {
+		if sp.Name == "coveclient" && (sp.State != "publish-only" || !sp.NoRelease || len(sp.Services) != 0) {
+			t.Errorf("status: %+v", sp)
+		}
+	}
+
+	for name, err := range map[string]error{
+		"deploy":   d.Deploy(ctx, "coveclient", ""),
+		"retry":    d.Retry(ctx, "coveclient"),
+		"restart":  d.Restart(ctx, "coveclient"),
+		"rollback": func() error { _, err := d.Rollback(ctx, "coveclient"); return err }(),
+		"check":    func() error { _, err := d.Check(ctx, "coveclient"); return err }(),
+		"logs":     func() error { _, err := d.Logs(ctx, "coveclient", 10); return err }(),
+	} {
+		if kind(err) != control.KindInvalid || !strings.Contains(err.Error(), "publish-only") {
+			t.Errorf("%s = %v", name, err)
+		}
+	}
+
+	if err := d.Remove(ctx, "coveclient", true); err != nil || len(cmp.downs) != 0 {
+		t.Errorf("remove: %v; compose down %v", err, cmp.downs)
 	}
 }
 
@@ -337,8 +374,8 @@ func TestErrorsExplainTheFix(t *testing.T) {
 		{d.Remove(ctx, "nope", false), control.KindNotFound, `"list"`},
 		{d.Rename(ctx, "personalWebsite", "bad name"), control.KindInvalid, "letters, digits"},
 		{d.SetURL(ctx, "personalWebsite", "https://gitlab.com/a/b"), control.KindInvalid, "https://github.com/<owner>/<repo>"},
-		{func() error { _, err := d.Add(ctx, "personalWebsite", "https://github.com/a/b"); return err }(), control.KindNameTaken, "already exists"},
-		{func() error { _, err := d.Add(ctx, "x", "https://github.com/lsariol/landing"); return err }(), control.KindConflict, "already watched"},
+		{func() error { _, err := d.Add(ctx, "personalWebsite", "https://github.com/a/b", false); return err }(), control.KindNameTaken, "already exists"},
+		{func() error { _, err := d.Add(ctx, "x", "https://github.com/lsariol/landing", false); return err }(), control.KindConflict, "already watched"},
 		{func() error { _, err := d.Logs(ctx, "personalWebsite", 0); return err }(), control.KindInvalid, "between 1 and"},
 		{func() error { _, err := d.History(ctx, "personalWebsite", 1000); return err }(), control.KindInvalid, "between 1 and"},
 		{func() error { _, err := d.Report(ctx, "personalWebsite", 1); return err }(), control.KindNotFound, "fewer than 1 deploys"},

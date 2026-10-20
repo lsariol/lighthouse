@@ -91,18 +91,21 @@ func commandTable(embedded bool) []command {
 		{
 			names:    []string{"add"},
 			group:    groupProjects,
-			synopsis: "<url> [--name <name>]",
+			synopsis: "<url> [--publish-only]",
 			summary:  "Start watching a GitHub repository",
 			usages: []usage{
 				{"add <url>", "Watch a repository's main branch, named after the repository. Its first deploy happens on the next check. The repository must follow the project rules: \"help setup\"."},
 				{"add <url> --name <name>", "Use another name, when the repository's name is taken. On a terminal, add asks for one instead."},
+				{"add <url> --publish-only", "Only publish a GitHub Release for each new version tag on main, never deploy: for a library or anything Lighthouse doesn't run. No compose file needed. Tags already there are left as they are."},
 			},
 			flags: []flag{
 				{"--name <name>", "The project's name. Letters, digits, - and _, up to 64."},
+				{"--publish-only", "Publish its Releases, never deploy it. Can't be changed later (remove and add it again)."},
 			},
 			examples: []example{
 				{"add https://github.com/LSariol/plop", "watched as plop"},
 				{"add https://github.com/x/plop --name plop-x", "a second plop"},
+				{"add https://github.com/LSariol/CoveClient --publish-only", "a Go library: Releases only"},
 			},
 			run: (*CLI).add,
 		},

@@ -117,9 +117,9 @@ func (c *Client) Projects(ctx context.Context) ([]Project, error) {
 	return p, err
 }
 
-func (c *Client) Add(ctx context.Context, name string, repoURL string) (Project, error) {
+func (c *Client) Add(ctx context.Context, name string, repoURL string, publishOnly bool) (Project, error) {
 	var p Project
-	err := c.call(ctx, http.MethodPost, "/v1/projects", map[string]string{"name": name, "url": repoURL}, &p)
+	err := c.call(ctx, http.MethodPost, "/v1/projects", map[string]any{"name": name, "url": repoURL, "publishOnly": publishOnly}, &p)
 	return p, err
 }
 

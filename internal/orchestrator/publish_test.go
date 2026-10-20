@@ -170,6 +170,79 @@ func TestPublishingOff(t *testing.T) {
 	o.RunPublisher(ctx)
 }
 
+func TestPublishOnly(t *testing.T) {
+	gh := newGitHub(map[string]string{"coveclient": "h1"})
+	gh.repos["coveclient"].tags = []github.Tag{{Name: "v0.9.0", SHA: "c090"}, {Name: "v1.0.0", SHA: "c100"}}
+	gh.repos["coveclient"].releases = []github.Release{{Tag: "v1.0.0", URL: "https://made/by/hand"}}
+	gh.repos["coveclient"].offBranch = map[string]bool{}
+	o, store, d, _ := setup(t, gh)
+	ctx := context.Background()
+	if _, err := store.AddPublishOnly(ctx, "coveclient", github.Repo{Owner: "o", Name: "coveclient"}); err != nil {
+		t.Fatal(err)
+	}
+	pub := &fakePublisher{gh: gh}
+	o.SetPublisher(pub, "")
+
+	// The baseline: nothing is published, an existing Release is adopted.
+	o.Scan(ctx)
+	o.PublishDue(ctx)
+	if r := releaseOf(t, store, "coveclient", "v1.0.0"); r.Status != projects.ReleasePublished || r.URL != "https://made/by/hand" {
+		t.Errorf("an existing Release at the baseline: %+v", r)
+	}
+	if r := releaseOf(t, store, "coveclient", "v0.9.0"); r.Status != projects.ReleaseKnown {
+		t.Errorf("an old tag at the baseline: %+v", r)
+	}
+	if len(pub.created) != 0 || d.count() != 0 || gh.calls["compose"] != 0 {
+		t.Fatalf("the baseline published %d, deployed %s, read the compose file %d times", len(pub.created), d.list(), gh.calls["compose"])
+	}
+
+	// New tags: each stable one on main is published, none deployed.
+	gh.repos["coveclient"].tags = append(gh.repos["coveclient"].tags, github.Tag{Name: "v1.1.0", SHA: "c110"},
+		github.Tag{Name: "v1.0.1", SHA: "c101"}, github.Tag{Name: "v1.2.0", SHA: "c120"}, github.Tag{Name: "v1.3.0-rc.1", SHA: "rc"})
+	gh.repos["coveclient"].offBranch["c120"] = true
+	o.Scan(ctx)
+	o.PublishDue(ctx)
+	latest := map[string]bool{}
+	for _, c := range pub.created {
+		latest[c.Tag] = c.Latest
+	}
+	if len(pub.created) != 2 || !latest["v1.1.0"] || latest["v1.0.1"] {
+		t.Errorf("published %+v; want v1.1.0 as latest and v1.0.1 not", pub.created)
+	}
+	if r := releaseOf(t, store, "coveclient", "v1.2.0"); r.Status != projects.ReleaseWaiting {
+		t.Errorf("a tag not on main: %+v", r)
+	}
+	if r := releaseOf(t, store, "coveclient", "v1.3.0-rc.1"); r.Status != projects.ReleaseKnown {
+		t.Errorf("a pre-release: %+v", r)
+	}
+
+	gh.repos["coveclient"].head, gh.repos["coveclient"].offBranch["c120"] = "h2", false
+	o.Scan(ctx)
+	o.PublishDue(ctx)
+	if r := releaseOf(t, store, "coveclient", "v1.2.0"); r.Status != projects.ReleasePublished || d.count() != 0 || gh.calls["compose"] != 0 {
+		t.Errorf("once on main: %+v; deployed %s, compose read %d times", r, d.list(), gh.calls["compose"])
+	}
+	if p := get(t, store, "coveclient"); p.LastError != "" || p.DeployedSHA != "" {
+		t.Errorf("project after the checks: %+v", p)
+	}
+
+	if err := o.Deploy(ctx, "coveclient", ""); !errors.Is(err, ErrPublishOnly) {
+		t.Errorf("Deploy = %v", err)
+	}
+	if _, err := o.Rollback(ctx, "coveclient"); !errors.Is(err, ErrPublishOnly) {
+		t.Errorf("Rollback = %v", err)
+	}
+	if err := o.Retry(ctx, "coveclient"); !errors.Is(err, ErrPublishOnly) {
+		t.Errorf("Retry = %v", err)
+	}
+	if _, _, err := o.Check(ctx, "coveclient"); !errors.Is(err, ErrPublishOnly) {
+		t.Errorf("Check = %v", err)
+	}
+	if r, err := o.Backfill(ctx, "coveclient", "v0.9.0", "", ""); err != nil || r.Status != projects.ReleasePublished {
+		t.Errorf("a backfill of a publish-only project = %+v, %v", r, err)
+	}
+}
+
 func TestLatest(t *testing.T) {
 	published := []github.Release{{Tag: "v1.2.0"}, {Tag: "v2.0.0", Draft: true}, {Tag: "v3.0.0-rc.1", Prerelease: true}, {Tag: "nightly"}}
 	for tag, want := range map[string]bool{"v1.3.0": true, "v1.1.0": false, "v1.2.0": false, "v2.0.0-rc.2": false} {
