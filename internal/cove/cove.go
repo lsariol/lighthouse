@@ -19,6 +19,21 @@ const (
 	MigratorDatabaseURLKey = "LIGHTHOUSE_MIGRATOR_DATABASE_URL" // lighthouse_migrator
 )
 
+// AppKeyKey is the GitHub App's private key, read when publishing needs it.
+const AppKeyKey = "LIGHTHOUSE_GITHUB_APP_SECRET"
+
+// AppKey reads the GitHub App's private key from Cove.
+func AppKey(ctx context.Context, c *coveclient.Client) ([]byte, error) {
+	values, err := c.GetSecretsContext(ctx, AppKeyKey)
+	switch {
+	case errors.Is(err, coveclient.ErrNotFound):
+		return nil, fmt.Errorf("Cove: %s isn't in Cove: store the GitHub App's private key there (DOCUMENTATION.md §4.7)", AppKeyKey)
+	case err != nil:
+		return nil, fmt.Errorf("Cove: reading %s: %w", AppKeyKey, err)
+	}
+	return []byte(values[AppKeyKey]), nil
+}
+
 // Secrets are Lighthouse's own secrets.
 type Secrets struct {
 	GitHubToken         string

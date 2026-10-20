@@ -110,6 +110,26 @@ type Release struct {
 	Note      string
 	CreatedAt time.Time
 	UpdatedAt time.Time
+
+	Attempts    int        // failed attempts to publish in a row
+	LastError   string     // the last attempt's error
+	NextAttempt *time.Time // when publishing is tried again
+	PublishedAt *time.Time
+	URL         string // its GitHub Release
+
+	Backfill  bool   // queued by `publish`, not verified by a deploy
+	NotesRef  string // the commit or branch whose CHANGELOG.md has its notes; its own commit if ""
+	NotesDate string // YYYY-MM-DD for its heading, over the CHANGELOG's; "" for none
+}
+
+// Published is how an attempt to publish a release went.
+type Published struct {
+	Status      string     // ReleasePublished, ReleasePending (try again), ReleaseFailed or ReleaseMoved
+	Note        string     // the release's new note
+	Error       string     // the attempt's error, or "" if it didn't fail
+	NextAttempt *time.Time // when to try again; nil for never
+	URL         string
+	At          time.Time
 }
 
 // What Lighthouse made of a version tag.
@@ -229,6 +249,19 @@ type Store interface {
 	// SetReleaseStatus changes a tracked tag's status and note.
 	// ErrNoRelease if the project has no such tag.
 	SetReleaseStatus(ctx context.Context, name string, tag string, status string, note string) error
+
+	// DueReleases returns the releases to publish now: pending ones not
+	// waiting for a later attempt, and failed ones whose next attempt is due;
+	// oldest first.
+	DueReleases(ctx context.Context, now time.Time) ([]Release, error)
+
+	// RecordPublish records an attempt to publish a release: its outcome,
+	// and the failed attempts in a row (0 after one without an error).
+	RecordPublish(ctx context.Context, name string, tag string, p Published) error
+
+	// QueueBackfill makes a tag pending as a backfill (`publish`), with
+	// r's SHA, NotesRef and NotesDate, due now; it adds the row if missing.
+	QueueBackfill(ctx context.Context, name string, r Release) error
 
 	// ClearFailures resets the failure count and the broken state.
 	ClearFailures(ctx context.Context, name string) error

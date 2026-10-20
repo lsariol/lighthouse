@@ -14,7 +14,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/lsariol/lighthouse/internal/changelog"
 	"github.com/lsariol/lighthouse/internal/deploy"
 	"github.com/lsariol/lighthouse/internal/docker"
 	"github.com/lsariol/lighthouse/internal/github"
@@ -49,6 +48,9 @@ type GitHub interface {
 	File(ctx context.Context, repo github.Repo, sha string, name string, token string) ([]byte, error)
 	ResolveCommit(ctx context.Context, repo github.Repo, ref string, token string) (string, error)
 	Contains(ctx context.Context, repo github.Repo, head string, sha string, token string) (bool, error)
+	TagCommit(ctx context.Context, repo github.Repo, tag string, token string) (string, bool, error)
+	ReleaseByTag(ctx context.Context, repo github.Repo, tag string, token string) (github.Release, bool, error)
+	Releases(ctx context.Context, repo github.Repo, token string) ([]github.Release, error)
 }
 
 // Containers tells the reconcile loop what's running. *docker.Client
@@ -85,6 +87,11 @@ type Orchestrator struct {
 
 	mu      sync.Mutex
 	watches map[string]*watch
+
+	publisher   Publisher
+	publishOff  string // why publishing is off
+	publishWake chan struct{}
+	publishing  sync.Mutex
 }
 
 // watch is what's remembered about a project between checks. It's only in
@@ -106,7 +113,7 @@ type watch struct {
 // token, read from Cove at startup).
 func New(store projects.Store, gh GitHub, deployer Deployer, containers Containers, gitToken string) *Orchestrator {
 	return &Orchestrator{store: store, github: gh, deployer: deployer, containers: containers, gitToken: gitToken,
-		now: time.Now, watches: map[string]*watch{}, handOffPoll: 2 * time.Second}
+		now: time.Now, watches: map[string]*watch{}, handOffPoll: 2 * time.Second, publishWake: make(chan struct{}, 1)}
 }
 
 func (o *Orchestrator) Pause()         { o.paused.Store(true) }
@@ -373,8 +380,7 @@ type Notes struct {
 	Warnings []string
 }
 
-// ReleaseNotes builds a tracked tag's Release text from the CHANGELOG at its
-// commit, dated today where the CHANGELOG gives no date.
+// ReleaseNotes builds a tracked tag's Release text as publishing would.
 func (o *Orchestrator) ReleaseNotes(ctx context.Context, name string, tag string) (Notes, error) {
 	p, err := o.store.Get(ctx, name)
 	if err != nil {
@@ -388,11 +394,10 @@ func (o *Orchestrator) ReleaseNotes(ctx context.Context, name string, tag string
 	if i < 0 {
 		return Notes{}, projects.ErrNoRelease
 	}
-	text, err := o.github.File(ctx, p.Repo, rows[i].SHA, changelog.File, o.gitToken)
+	body, warnings, err := o.notes(ctx, p, rows[i], o.now())
 	if err != nil {
 		return Notes{}, err
 	}
-	body, warnings := changelog.Notes(text, tag, o.now())
 	return Notes{Release: rows[i], Body: body, Warnings: warnings}, nil
 }
 
@@ -782,6 +787,9 @@ func (o *Orchestrator) recordDeployment(ctx context.Context, d projects.Deployme
 	deadline := time.Now().Add(recordRetries)
 	for {
 		err := o.store.RecordDeployment(ctx, d)
+		if err == nil && d.Status == projects.StatusSucceeded && (d.Trigger == projects.TriggerCheck || d.Trigger == projects.TriggerRetry) {
+			o.wakePublisher()
+		}
 		if err == nil || errors.Is(err, projects.ErrNotFound) {
 			return
 		}

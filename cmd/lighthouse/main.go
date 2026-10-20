@@ -198,8 +198,16 @@ func start(ctx context.Context, cfg config.Config, d *daemon.Daemon, dockerClien
 	}
 	commits := github.Client{HTTP: &http.Client{Timeout: 30 * time.Second}}
 	orch := orchestrator.New(db, commits, deployer, dockerClient, secrets.GitHubToken)
+	if cfg.GitHubAppID == "" {
+		orch.SetPublisher(nil, "GITHUB_APP_ID isn't set (DOCUMENTATION.md §4.7)")
+	} else {
+		orch.SetPublisher(&github.App{ID: cfg.GitHubAppID, HTTP: commits.HTTP,
+			Key: func(ctx context.Context) ([]byte, error) { return cove.AppKey(ctx, coveClient) }}, "")
+		slog.Info("publishing GitHub Releases is on", "app_id", cfg.GitHubAppID)
+	}
 	d.Ready(db, orch, db)
 	orch.RecordHandOffs(ctx)
+	go orch.RunPublisher(ctx)
 
 	list, _ := db.List(ctx)
 	slog.Info("Lighthouse ready", "projects", len(list), "poll_interval", cfg.PollInterval.String(), "control_socket", cfg.ControlSocket)

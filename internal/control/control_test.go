@@ -97,6 +97,11 @@ func (f *fakeService) ReleaseNotes(ctx context.Context, name string, tag string)
 	return ReleaseNotes{Release: Release{Tag: tag}, Body: "## " + tag + " (2026-10-20)\n", Warnings: []string{"undated"}}, nil
 }
 
+func (f *fakeService) Publish(ctx context.Context, name string, tag string, date string, notesFrom string) (Release, error) {
+	f.record("publish " + name + " " + tag + " " + date + " " + notesFrom)
+	return Release{Tag: tag, Status: "published", URL: "https://r", Backfill: true}, nil
+}
+
 // serve starts Serve on a socket in a temp folder and returns a Client for it.
 func serve(t *testing.T, svc Service) (*Client, string) {
 	t.Helper()
@@ -172,6 +177,9 @@ func TestRoundTrip(t *testing.T) {
 	if err != nil || notes.Release.Tag != "v1.0.0-rc.1" || notes.Body != "## v1.0.0-rc.1 (2026-10-20)\n" || len(notes.Warnings) != 1 {
 		t.Errorf("ReleaseNotes = %+v, %v", notes, err)
 	}
+	if rel, err := c.Publish(ctx, "plop", "v0.9.0", "2025-01-02", "main"); err != nil || rel.URL != "https://r" || !rel.Backfill {
+		t.Errorf("Publish = %+v, %v", rel, err)
+	}
 
 	for _, call := range []func() error{
 		func() error { return c.Rename(ctx, "plop", "plop2") },
@@ -189,7 +197,7 @@ func TestRoundTrip(t *testing.T) {
 		}
 	}
 
-	want := []string{"add new https://github.com/a/new", "logs plop", "report plop 2", "check plop", "history plop 5", "releases plop", "release notes plop v1.0.0-rc.1", "rename plop plop2", "set-url plop https://github.com/a/b",
+	want := []string{"add new https://github.com/a/new", "logs plop", "report plop 2", "check plop", "history plop 5", "releases plop", "release notes plop v1.0.0-rc.1", "publish plop v0.9.0 2025-01-02 main", "rename plop plop2", "set-url plop https://github.com/a/b",
 		"retry plop", "start plop:web", "stop plop", "restart plop", "scan", "pause", "resume"}
 	if len(svc.calls) != len(want) {
 		t.Fatalf("calls = %v, want %v", svc.calls, want)

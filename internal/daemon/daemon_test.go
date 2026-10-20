@@ -94,6 +94,21 @@ func (fakeCommits) File(ctx context.Context, repo github.Repo, sha string, name 
 func (fakeCommits) Contains(ctx context.Context, repo github.Repo, head string, sha string, token string) (bool, error) {
 	return true, nil
 }
+func (fakeCommits) TagCommit(ctx context.Context, repo github.Repo, tag string, token string) (string, bool, error) {
+	return "s" + tag, tag != "v9.9.9", nil
+}
+func (fakeCommits) ReleaseByTag(ctx context.Context, repo github.Repo, tag string, token string) (github.Release, bool, error) {
+	return github.Release{}, false, nil
+}
+func (fakeCommits) Releases(ctx context.Context, repo github.Repo, token string) ([]github.Release, error) {
+	return nil, nil
+}
+
+type fakePublisher struct{}
+
+func (fakePublisher) Publish(ctx context.Context, repo github.Repo, r github.NewRelease) (github.Release, error) {
+	return github.Release{Tag: r.Tag, URL: "https://github.com/" + repo.String() + "/releases/tag/" + r.Tag}, nil
+}
 
 // newDaemon returns a running daemon on an in-memory store, with
 // personalWebsite (compose project "website": web, www, bot) watched.
@@ -152,6 +167,38 @@ func TestReleases(t *testing.T) {
 	}
 	if _, err := d.ReleaseNotes(ctx, "personalWebsite", "v3.0.0"); kind(err) != control.KindNotFound || !strings.Contains(err.Error(), "releases personalWebsite") {
 		t.Errorf("ReleaseNotes of an untracked tag = %v", err)
+	}
+}
+
+func TestPublish(t *testing.T) {
+	d, _, _, store := newDaemon(t)
+	ctx := context.Background()
+	if _, err := d.Publish(ctx, "personalWebsite", "v1.0.0", "", ""); kind(err) != control.KindUnavailable || !strings.Contains(err.Error(), "GITHUB_APP_ID") {
+		t.Errorf("Publish while publishing is off = %v", err)
+	}
+	if s, _ := d.Status(ctx); !strings.HasPrefix(s.Publishing, "off") {
+		t.Errorf("status: publishing %q", s.Publishing)
+	}
+
+	o := orchestrator.New(store, fakeCommits{}, fakeDeployer{}, nil, "t")
+	o.SetPublisher(fakePublisher{}, "")
+	d.cfg.GitHubAppID = "42"
+	d.Ready(store, o, fakeHealth{3, 3})
+	rel, err := d.Publish(ctx, "personalwebsite", "v1.0.0", "2025-01-02", "")
+	if err != nil || rel.Status != "published" || rel.URL != "https://github.com/lsariol/landing/releases/tag/v1.0.0" || !rel.Backfill {
+		t.Errorf("Publish = %+v, %v", rel, err)
+	}
+	if _, err := d.Publish(ctx, "personalWebsite", "v1.0.0", "", ""); kind(err) != control.KindConflict || !strings.Contains(err.Error(), "already published") {
+		t.Errorf("publishing twice = %v", err)
+	}
+	if _, err := d.Publish(ctx, "personalWebsite", "v9.9.9", "", ""); kind(err) != control.KindInvalid || !strings.Contains(err.Error(), `no tag "v9.9.9"`) {
+		t.Errorf("a missing tag = %v", err)
+	}
+	if _, err := d.Publish(ctx, "nope", "v1.0.0", "", ""); kind(err) != control.KindNotFound {
+		t.Errorf("a missing project = %v", err)
+	}
+	if s, _ := d.Status(ctx); s.Publishing != "on (GitHub App 42)" {
+		t.Errorf("status: publishing %q", s.Publishing)
 	}
 }
 

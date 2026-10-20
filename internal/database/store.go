@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -243,12 +244,68 @@ func recordDeployedReleases(ctx context.Context, tx pgx.Tx, projectID int64, dep
 	return nil
 }
 
-const releaseColumns = `p.name, r.tag, r.sha, r.status, coalesce(r.note, ''), r.created_at, r.updated_at`
+const releaseColumns = `p.name, r.tag, r.sha, r.status, coalesce(r.note, ''), r.created_at, r.updated_at,
+	r.attempts, coalesce(r.last_error, ''), r.next_attempt_at, r.published_at, coalesce(r.url, ''),
+	r.backfill, coalesce(r.notes_ref, ''), coalesce(to_char(r.notes_date, 'YYYY-MM-DD'), '')`
 
 func scanRelease(row pgx.CollectableRow) (projects.Release, error) {
 	var r projects.Release
-	err := row.Scan(&r.Project, &r.Tag, &r.SHA, &r.Status, &r.Note, &r.CreatedAt, &r.UpdatedAt)
+	err := row.Scan(&r.Project, &r.Tag, &r.SHA, &r.Status, &r.Note, &r.CreatedAt, &r.UpdatedAt,
+		&r.Attempts, &r.LastError, &r.NextAttempt, &r.PublishedAt, &r.URL,
+		&r.Backfill, &r.NotesRef, &r.NotesDate)
 	return r, err
+}
+
+func (d *Database) DueReleases(ctx context.Context, now time.Time) ([]projects.Release, error) {
+	rows, err := d.pool.Query(ctx, `SELECT `+releaseColumns+` FROM lighthouse.releases r JOIN lighthouse.projects p ON p.id = r.project_id
+		WHERE (r.status = 'pending' AND (r.next_attempt_at IS NULL OR r.next_attempt_at <= $1))
+		   OR (r.status = 'failed' AND r.next_attempt_at <= $1)
+		ORDER BY r.id`, now)
+	if err != nil {
+		return nil, fmt.Errorf("database: releases to publish: %w", err)
+	}
+	list, err := pgx.CollectRows(rows, scanRelease)
+	if err != nil {
+		return nil, fmt.Errorf("database: releases to publish: %w", err)
+	}
+	return list, nil
+}
+
+func (d *Database) RecordPublish(ctx context.Context, name string, tag string, pub projects.Published) error {
+	if _, err := d.Get(ctx, name); err != nil {
+		return err
+	}
+	tagged, err := d.pool.Exec(ctx, `UPDATE lighthouse.releases r
+		SET status = $3, note = nullif($4, ''), last_error = nullif($5, ''), next_attempt_at = $6,
+		    attempts = CASE WHEN $5 = '' THEN 0 ELSE r.attempts + 1 END,
+		    url = CASE WHEN $3 = 'published' THEN $7 ELSE r.url END,
+		    published_at = CASE WHEN $3 = 'published' THEN $8 ELSE r.published_at END,
+		    updated_at = now()
+		FROM lighthouse.projects p WHERE p.id = r.project_id AND lower(p.name) = lower($1) AND r.tag = $2`,
+		name, tag, pub.Status, pub.Note, projects.ErrorText(projects.ErrorString(pub.Error)), pub.NextAttempt, pub.URL, pub.At)
+	if err != nil {
+		return fmt.Errorf("database: record publishing %s of %q: %w", tag, name, err)
+	}
+	if tagged.RowsAffected() == 0 {
+		return projects.ErrNoRelease
+	}
+	return nil
+}
+
+func (d *Database) QueueBackfill(ctx context.Context, name string, r projects.Release) error {
+	tagged, err := d.pool.Exec(ctx, `INSERT INTO lighthouse.releases (project_id, tag, sha, status, backfill, notes_ref, notes_date, next_attempt_at)
+		SELECT id, $2, $3, 'pending', true, nullif($4, ''), nullif($5, '')::date, now() FROM lighthouse.projects WHERE lower(name) = lower($1)
+		ON CONFLICT (project_id, tag) DO UPDATE
+		SET status = 'pending', note = NULL, backfill = true, notes_ref = excluded.notes_ref, notes_date = excluded.notes_date,
+		    attempts = 0, last_error = NULL, next_attempt_at = now(), updated_at = now()`,
+		name, r.Tag, r.SHA, r.NotesRef, r.NotesDate)
+	if err != nil {
+		return fmt.Errorf("database: queue %s of %q to publish: %w", r.Tag, name, err)
+	}
+	if tagged.RowsAffected() == 0 {
+		return projects.ErrNotFound
+	}
+	return nil
 }
 
 func (d *Database) Releases(ctx context.Context, name string) ([]projects.Release, error) {

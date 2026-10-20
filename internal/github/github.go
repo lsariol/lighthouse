@@ -3,6 +3,7 @@
 package github
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -56,6 +58,9 @@ const DefaultAPI = "https://api.github.com"
 type Client struct {
 	HTTP *http.Client
 	API  string
+
+	Token string // the token's name in errors; "" for Lighthouse's own (LIGHTHOUSE_GITHUB_TOKEN)
+	Needs string // the permissions it needs, in errors; "" for read-only
 }
 
 func (c Client) httpClient() *http.Client {
@@ -66,11 +71,15 @@ func (c Client) httpClient() *http.Client {
 }
 
 func (c Client) url(repo Repo, path string) string {
+	return c.apiURL("/repos/" + repo.Owner + "/" + repo.Name + path)
+}
+
+func (c Client) apiURL(path string) string {
 	base := c.API
 	if base == "" {
 		base = DefaultAPI
 	}
-	return strings.TrimRight(base, "/") + "/repos/" + repo.Owner + "/" + repo.Name + path
+	return strings.TrimRight(base, "/") + path
 }
 
 // Error is a failed GitHub request; Temporary says whether retrying may help.
@@ -100,16 +109,33 @@ var ErrNotModified = errors.New("not modified")
 
 // get sends an authenticated GET and returns the response if it's 200 OK.
 func (c Client) get(ctx context.Context, op string, url string, token string, accept string, etag string) (*http.Response, error) {
+	return c.send(ctx, http.MethodGet, op, url, token, accept, etag, nil, http.StatusOK)
+}
+
+// send sends an authenticated request, with body as JSON unless it's nil,
+// and returns the response if its status is one of ok.
+func (c Client) send(ctx context.Context, method string, op string, url string, token string, accept string, etag string, body any, ok ...int) (*http.Response, error) {
 	if token == "" {
 		return nil, &Error{Op: op, Err: errors.New("no GitHub token yet (Lighthouse is still waiting for Cove)")}
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	var reader io.Reader
+	if body != nil {
+		data, err := json.Marshal(body)
+		if err != nil {
+			return nil, &Error{Op: op, Err: err}
+		}
+		reader = bytes.NewReader(data)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, url, reader)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", accept)
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	if etag != "" {
 		req.Header.Set("If-None-Match", etag)
 	}
@@ -122,30 +148,63 @@ func (c Client) get(ctx context.Context, op string, url string, token string, ac
 		resp.Body.Close()
 		return nil, ErrNotModified
 	}
-	if resp.StatusCode != http.StatusOK {
+	if !slices.Contains(ok, resp.StatusCode) {
 		defer resp.Body.Close()
-		var body struct{ Message string }
-		json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&body)
-		msg := resp.Status
-		if body.Message != "" {
-			msg += " (" + body.Message + ")"
+		var answer struct {
+			Message string
+			Errors  []struct{ Code string }
 		}
-		return nil, &Error{Op: op, Status: resp.StatusCode, Err: errors.New(msg + hint(resp.StatusCode, body.Message))}
+		json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&answer)
+		msg := resp.Status
+		if answer.Message != "" {
+			msg += " (" + answer.Message + ")"
+		}
+		for _, e := range answer.Errors {
+			if e.Code != "" {
+				msg += " [" + e.Code + "]"
+			}
+		}
+		return nil, &Error{Op: op, Status: resp.StatusCode, Err: errors.New(msg + c.hint(resp.StatusCode, answer.Message))}
 	}
 	return resp, nil
 }
 
+// call sends a request and decodes a JSON answer into out (if not nil).
+func (c Client) call(ctx context.Context, method string, op string, url string, token string, body any, out any, ok ...int) error {
+	resp, err := c.send(ctx, method, op, url, token, "application/vnd.github+json", "", body, ok...)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if out == nil {
+		return nil
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(out); err != nil {
+		return &Error{Op: op, Status: resp.StatusCode, Err: fmt.Errorf("unexpected answer: %v", err)}
+	}
+	return nil
+}
+
 // hint says what usually causes a status.
-func hint(status int, message string) string {
+func (c Client) hint(status int, message string) string {
+	token, needs, missing := c.Token, c.Needs, "the App must be installed on the repository"
+	if token == "" {
+		token, missing = "Lighthouse's GitHub token (LIGHTHOUSE_GITHUB_TOKEN in Cove)", "a fine-grained token must list the repository"
+	}
+	if needs == "" {
+		needs = "Contents: read and Metadata: read"
+	}
 	switch {
 	case status == http.StatusUnauthorized:
-		return ". Lighthouse's GitHub token (LIGHTHOUSE_GITHUB_TOKEN in Cove) was rejected: it may have expired or been revoked"
+		return ". " + token + " was rejected: it may have expired or been revoked"
+	case status == http.StatusNotFound && c.Token == "":
+		return ". The repository, commit or file doesn't exist, or Lighthouse's token can't read it (" + missing + ")"
 	case status == http.StatusNotFound:
-		return ". The repository, commit or file doesn't exist, or Lighthouse's token can't read it (a fine-grained token must list the repository)"
+		return ". The repository, commit or file doesn't exist, or " + token + " can't reach it (" + missing + ")"
 	case status == http.StatusTooManyRequests, status == http.StatusForbidden && strings.Contains(message, "rate limit"):
 		return ". GitHub's rate limit: it's tried again after a wait"
 	case status == http.StatusForbidden:
-		return ". The token lacks a permission (it needs Contents: read and Metadata: read)"
+		return ". " + token + " lacks a permission (it needs " + needs + ")"
 	}
 	return ""
 }

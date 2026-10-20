@@ -55,6 +55,10 @@ type Service interface {
 	Releases(ctx context.Context, name string) ([]Release, error)
 	// ReleaseNotes shows what a tracked tag's GitHub Release would say.
 	ReleaseNotes(ctx context.Context, name string, tag string) (ReleaseNotes, error)
+	// Publish publishes a GitHub Release for an existing tag now, without
+	// deploying it (a backfill): its notes from notesFrom's CHANGELOG.md if
+	// given, dated date (YYYY-MM-DD) if given. A failed attempt stays queued.
+	Publish(ctx context.Context, name string, tag string, date string, notesFrom string) (Release, error)
 }
 
 // Status is the daemon's health and every project's container state.
@@ -69,6 +73,8 @@ type Status struct {
 	GitHubToken  bool          `json:"githubToken"`
 	Database     string        `json:"database"`
 	Schema       string        `json:"schema"`
+	Publishing   string        `json:"publishing,omitempty"`  // "on (GitHub App <id>)", or "off: <why>"
+	Unpublished  int           `json:"unpublished,omitempty"` // pending releases
 	Projects     []Project     `json:"projects"`
 }
 
@@ -92,17 +98,22 @@ type Project struct {
 	LastErrorAt    *time.Time      `json:"lastErrorAt,omitempty"`
 	FailureCount   int             `json:"failureCount,omitempty"`
 	Broken         bool            `json:"broken,omitempty"`
-	OpenReleases   []Release       `json:"openReleases,omitempty"` // tags that are waiting or moved
+	OpenReleases   []Release       `json:"openReleases,omitempty"` // tags waiting or moved, and Releases failing to publish
 	NoRelease      bool            `json:"noRelease,omitempty"`    // deploys releases but has no version tag yet
 }
 
 // Release is a version tag Lighthouse tracks, and what it made of it.
 type Release struct {
-	Tag    string    `json:"tag"`
-	Commit string    `json:"commit"`
-	Status string    `json:"status"`
-	Note   string    `json:"note,omitempty"`
-	Since  time.Time `json:"since"`
+	Tag         string     `json:"tag"`
+	Commit      string     `json:"commit"`
+	Status      string     `json:"status"`
+	Note        string     `json:"note,omitempty"`
+	Since       time.Time  `json:"since"`
+	Attempts    int        `json:"attempts,omitempty"`    // failed attempts to publish in a row
+	Error       string     `json:"error,omitempty"`       // the last attempt's error
+	NextAttempt *time.Time `json:"nextAttempt,omitempty"` // when publishing is tried again
+	URL         string     `json:"url,omitempty"`         // its GitHub Release
+	Backfill    bool       `json:"backfill,omitempty"`    // published with `publish`, not verified by a deploy
 }
 
 // ReleaseNotes is what a tag's GitHub Release would say.

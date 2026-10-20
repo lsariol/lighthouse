@@ -4,18 +4,23 @@ All notable changes to Lighthouse. Versions follow [semantic versioning](https:/
 
 ## v1.1.0 (unreleased)
 
-Lighthouse starts tracking each project's version tags, the first step toward publishing GitHub Releases. Nothing is published yet.
+Lighthouse publishes a GitHub Release for each version it deploys and verifies, through a GitHub App you own.
 
 ### Added
-- **Release tracking** for projects that deploy releases (DOCUMENTATION.md §4.7). Each version tag gets a status: `known`, `waiting`, `ready`, `pending`, `superseded` or `moved`. The tags already there at the first check are recorded as `known` and never published automatically.
+- **Release tracking** for projects that deploy releases (DOCUMENTATION.md §4.7). Each version tag gets a status: `known`, `waiting`, `ready`, `pending`, `published`, `failed`, `superseded` or `moved`. The tags already there at the first check are recorded as `known` and never published automatically.
+- **Publishing GitHub Releases.** Once a release deploys and passes its checks (from a check, a `retry`, or Lighthouse's own update), its Release is published with its dated `CHANGELOG.md` section, and becomes "latest" only if it's the highest stable version. A Release that already exists is adopted; a moved or deleted tag is never published. Failures are retried with a backoff, kept across restarts, and shown by `status`. Needs a GitHub App (`GITHUB_APP_ID`, its key `LIGHTHOUSE_GITHUB_APP_SECRET` in Cove); without one, publishing is off and Releases wait.
+- **`publish <name> <tag>`** publishes an existing tag's Release without deploying it, for versions from before publishing (`--date`, `--notes-from`). Marked as not verified by a deploy.
 - **`releases <name> [tag]`** lists a project's tags and their status, or shows the GitHub Release text a tag will get: its `CHANGELOG.md` section under a dated heading, with a warning when the section or the date is missing.
-- `list` and `status` show tags waiting for `main`, moved tags, and projects that deploy releases but have no version tag yet.
+- `list` and `status` show tags waiting for `main`, moved tags, Releases failing to publish, and projects that deploy releases but have no version tag yet. `status` shows whether publishing is on.
 
 ### Changed
 - **A release deploys only once its commit is on the default branch.** A tag pushed before `main` waits, and deploys on the first check after `main` contains it.
 - Version tags are compared as SemVer, pre-releases included; pre-releases are still never deployed automatically.
 - `retry` is recorded with its own trigger, `retry`, instead of `manual`: a release it deploys counts as deployed by a check.
 - **Tests run in the Dockerfile's `test` stage instead of GitHub Actions.** Every deploy of Lighthouse runs gofmt, vet and the tests with `-race` first, and a failure stops the deploy. The database tests, `govulncheck` and the checks that need Docker run locally (DOCUMENTATION.md §13.1).
+
+### Upgrading
+- To publish, create the GitHub App and set it up as DOCUMENTATION.md §4.7 describes (the key in Cove, `GITHUB_APP_ID` in `docker-compose.yml`). Until then Lighthouse runs as before, and the releases it deploys wait to be published.
 
 ## v1.0.3 (2026-10-20)
 

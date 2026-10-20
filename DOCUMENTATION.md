@@ -124,10 +124,10 @@ internal/
                            "<project>[:<service>]"; turns errors into messages that say how
                            to fix them; the startup phase
   orchestrator/            When projects deploy: checks (ETags, release tags, settings),
-                           tracking version tags (§4.7), the turn (one deploy at a time, by
-                           tier), waits after failures, Deploy, Rollback, Retry, Check, the
-                           reconcile loop, self-update results; records every check and
-                           deploy in the store
+                           tracking version tags and publishing Releases (§4.7, publish.go),
+                           the turn (one deploy at a time, by tier), waits after failures,
+                           Deploy, Rollback, Retry, Check, the reconcile loop, self-update
+                           results; records every check and deploy in the store
   deploy/                  How a project deploys: deploy.go (the steps, backup, rollback),
                            source.go (unpacking), verify.go (health, cleanup), scrub.go
                            (hiding secrets), selfupdate.go (the hand-off and the helper)
@@ -144,7 +144,8 @@ internal/
   database/                Postgres: the pool, goose migrations (migrations/, built in), the
                            schema check, and the Store
   github/                  Repository URLs, commits, tags, a file at a commit (the compose
-                           file, CHANGELOG.md), whether a commit is on a branch, a tarball
+                           file, CHANGELOG.md), whether a commit is on a branch, a tarball;
+                           Releases; app.go signs in as the GitHub App that publishes them
   cove/                    Connecting to Cove at startup; Lighthouse's own secrets
 scripts/
   db/                      Admin SQL for sparkdb, run by hand (§10.1); test-db.sh uses it too
@@ -303,7 +304,7 @@ Lighthouse deploys itself like any project (its compose file says `x-lighthouse:
 
 ### 4.7 Releases
 
-For a project that deploys releases, Lighthouse records every version tag and what it made of it (table `releases`, [§6](#6-data-the-database)), so that a GitHub Release can be published for each version once it has deployed and passed its checks. **v1.1.0 only tracks them: nothing is published yet.** `releases <name>` lists them; `releases <name> <tag>` shows the Release text that will be published.
+For a project that deploys releases, Lighthouse records every version tag and what it made of it (table `releases`, [§6](#6-data-the-database)), and publishes a **GitHub Release** for each version once it has deployed and passed its checks. mobasity.com reads those Releases. `releases <name>` lists the tags; `releases <name> <tag>` shows the Release text that will be published.
 
 | Status | Meaning | What happens |
 |---|---|---|
@@ -311,19 +312,44 @@ For a project that deploys releases, Lighthouse records every version tag and wh
 | `waiting` | Its commit isn't on the default branch yet: the tag was pushed before `main` | Checked again whenever the branch moves; `status` mentions it after 10 minutes |
 | `ready` | On the default branch and newer than any release deployed before | The next check deploys the newest one |
 | `pending` | Deployed by a check (or by Lighthouse's own update, recorded after the hand-off) and verified | Its GitHub Release is due |
-| `published`, `failed` | The Release exists; publishing it failed | (from v1.2.0) |
+| `published` | Its GitHub Release exists: published by Lighthouse, adopted (it already existed), or a backfill (`publish`) | Nothing more |
+| `failed` | Publishing it failed for a reason that won't pass by itself (a permission, a key), or its tag was deleted | Tried again hourly (never for a deleted tag); `status` mentions it |
 | `superseded` | Never deployed: a newer release deployed first, or it isn't newer than one already deployed (versions only move forward) | Never deployed or published automatically |
 | `moved` | The tag now points at another commit than when it was first seen | Never deployed or published; `status` mentions it |
 
 - **Pending is set in the same transaction that records the deploy**, so a restart can't lose it. A ready release that `retry` deploys (after it broke the project) becomes pending too. Deploys by hand (`deploy`, `rollback`) and the reconcile loop never make a release pending.
 - **The Release text** is the version's section of `CHANGELOG.md` at the tag's commit, under the heading `## vX.Y.Z (YYYY-MM-DD)`: the date written in the CHANGELOG, or the publication date with a warning when the heading has none. Without a section the text is "No notes for this version." Headings may be written `## v1.2.3 (2026-10-20)`, `## v1.2.3` or `## [1.2.3] — 2026-10-20`.
-- `list` shows a project's waiting and moved tags, and a project that deploys releases but has no version tag yet; `status` lists them under "Needs attention".
+- `list` shows a project's waiting and moved tags, Releases failing to publish, and a project that deploys releases but has no version tag yet; `status` lists them under "Needs attention".
+
+**Publishing.** Right after a deploy makes a release pending, and every minute, Lighthouse publishes what's due. Pausing doesn't stop it. For each pending release:
+
+1. The tag must still exist and point at the commit recorded when it was first seen: a deleted tag fails, a moved one becomes `moved`. Neither is published.
+2. A Release that already exists for the tag (made by hand, or by an earlier attempt) is **adopted**, never duplicated or overwritten.
+3. The text is built as above, at the tag's commit.
+4. It's **"latest"** only if it's a stable version higher than every stable Release already published, so a backfill of an old version never takes "latest" away. Pre-releases never are.
+5. It's created for the existing tag. Lighthouse never creates or moves a tag.
+
+A failure that may pass (GitHub or Cove unreachable, a rate limit) keeps the release `pending` and tries again after 1 minute, then 2, 4, … up to 30; `status` mentions it after 3 in a row. Any other failure makes it `failed`, tried again hourly, so fixing a permission is picked up without anything else to do. A repository the GitHub App isn't installed on isn't published to: the release stays `pending`, says so, and is published within the hour after the App is installed there. Every attempt is in the database, so a restart (or a self-update) loses nothing.
+
+**Backfill:** `publish <name> <tag> [--date YYYY-MM-DD] [--notes-from <ref>]` publishes an existing tag now, without deploying it: a version from before Lighthouse published Releases, or one deployed by hand. It asks first, and is marked "not verified by a deploy" in `releases`. `--date` puts a date in the heading over the CHANGELOG's; `--notes-from` reads the CHANGELOG at another branch or commit. Old tags are never published otherwise.
+
+**Lighthouse's own Release** is published by the new Lighthouse, after its self-update's result is recorded ([§4.6](#46-self-update)).
+
+**Setting it up (once):**
+
+1. On GitHub, **create a GitHub App** you own (Settings → Developer settings → GitHub Apps → New): any name; homepage URL `https://github.com/<you>`; **no webhook** (untick Active); repository permissions **Contents: Read and write** (Metadata: Read-only comes with it), nothing else; "Only on this account".
+2. On the App's page, note the **App ID** (a number; not the Client ID), and **generate a private key** (a `.pem` file).
+3. **Install the App** on the repositories whose Releases Lighthouse publishes ("Only select repositories"). A repository it isn't installed on is simply not published to.
+4. In Cove: `create LIGHTHOUSE_GITHUB_APP_SECRET <the whole .pem file>` (or the file in base64, if the shell can't take several lines). Then delete the `.pem` file.
+5. In Lighthouse's `docker-compose.yml`, add `- GITHUB_APP_ID=<the App ID>` to `environment:` and release Lighthouse. `status` then shows `Publishing: on (GitHub App <id>)`.
+
+**What the App can do:** an installation token can write the contents of each repository it's installed on (Releases, but also files and branches; GitHub has no Releases-only permission), within the tag and branch rulesets on that repository. Lighthouse asks for a token for one repository at a time, valid an hour; the private key never leaves Cove and Lighthouse's memory and is never logged. If it leaks: generate a new key on the App's page, `update LIGHTHOUSE_GITHUB_APP_SECRET`, delete the old key there. Lighthouse reads the new one on its next attempt.
 
 ---
 
 ## 5. Configuration
 
-All settings are environment variables; Lighthouse's secrets (the GitHub token and both database URLs) come from Cove instead ([§8](#8-cove-integration)). In Docker they're written out in `docker-compose.yml`'s `environment:` (none of them is a secret). For local development they can come from a `.env` file ([§13.1](#131-running-locally)).
+All settings are environment variables; Lighthouse's secrets (the GitHub token, both database URLs and the GitHub App's key) come from Cove instead ([§8](#8-cove-integration)). In Docker they're written out in `docker-compose.yml`'s `environment:` (none of them is a secret). For local development they can come from a `.env` file ([§13.1](#131-running-locally)).
 
 | Variable | Required for `serve` | Description |
 |---|---|---|
@@ -336,6 +362,7 @@ All settings are environment variables; Lighthouse's secrets (the GitHub token a
 | `LIGHTHOUSE_VERSION` | No | The version `status` and `version` report. Set in the compose file at release; without it, `dev` (plus the commit for a local build) |
 | `LIGHTHOUSE_POLL_INTERVAL` | No | How often GitHub is checked, e.g. `30s`, `1m`. Default `10s`, minimum `5s` |
 | `LIGHTHOUSE_CONTROL_SOCKET` | No | Where the daemon listens for the CLI. Default `/run/lighthouse/control.sock` (inside the container; not mounted) |
+| `GITHUB_APP_ID` | No | The App ID of the GitHub App that publishes Releases ([§4.7](#47-releases)). Unset: publishing is off, and pending Releases wait |
 | `APP_ENV_PATH` | No | Local development: the `.env` file to load instead of `./.env` |
 
 A malformed value stops startup with a message naming the setting.
@@ -392,7 +419,7 @@ Lighthouse's state is in `lighthouse_db` on sparkdb, schema `lighthouse`. Roles,
 
 `projects.held_sha` (migration `00005`): the branch's newest commit when someone went back to an older one; checks don't deploy it again.
 
-**`releases`** (migration `00006`): one row per version tag of a project that deploys releases ([§4.7](#47-releases)): `tag`, `sha` (the commit when first seen), `status`, `note` (why, in a sentence), `deployment_id` (the deploy that made it pending), `created_at`, `updated_at`. Unique per project and tag; the rows go when the project is removed. `projects.releases_tracked_at` is when its baseline was taken.
+**`releases`** (migrations `00006`, `00007`): one row per version tag of a project that deploys releases ([§4.7](#47-releases)): `tag`, `sha` (the commit when first seen), `status`, `note` (why, in a sentence), `deployment_id` (the deploy that made it pending), `created_at`, `updated_at`; publishing: `attempts` (failed in a row), `last_error`, `next_attempt_at`, `published_at`, `url` (the Release); a backfill: `backfill`, `notes_ref`, `notes_date`. Unique per project and tag; the rows go when the project is removed. `projects.releases_tracked_at` is when its baseline was taken.
 
 **Who may do what** (migrations `00002`–`00006`): `lighthouse_app` reads and changes `projects` and reads, adds and updates `releases`, but can only **add** to `deployments` and `deployment_steps`, never change or delete history, and only reads `goose_db_version`; it can't create anything. `lighthouse_reader` reads everything (pgAdmin). Everything is owned by `lighthouse_owner`.
 
@@ -534,6 +561,7 @@ The settings are read from the default branch's compose file whenever the branch
 | Address | `COVE_URL=http://cove:2100` on `spark`; Cove has no published port |
 | Token | Lighthouse's own project token, **read-only over everything** (`token create lighthouse --allow '*'`). Fetched once through the bootstrap endpoint and saved to `COVE_TOKEN_PATH`; checked with `Auth` on every start |
 | Keys Lighthouse reads for itself | At startup, in one batch: `LIGHTHOUSE_GITHUB_TOKEN`, `LIGHTHOUSE_DATABASE_URL` (as `lighthouse_app`), `LIGHTHOUSE_MIGRATOR_DATABASE_URL` (as `lighthouse_migrator`). All three must exist |
+| Key it reads to publish | `LIGHTHOUSE_GITHUB_APP_SECRET`: the GitHub App's private key, read when publishing first needs it and kept in memory (read again if GitHub rejects it). Missing: Releases stay pending, and `status` says why ([§4.7](#47-releases)) |
 | Keys it reads for projects | Every `${KEY}` without a default in each project's compose file, as one `GetSecrets` batch per deploy (and one more for a rollback) |
 | Audit | Every read shows as `lighthouse` in Cove's `history <KEY>` |
 | Database keys | One connection string per role that logs in, nothing else: `LIGHTHOUSE_DATABASE_URL` (app), `LIGHTHOUSE_MIGRATOR_DATABASE_URL`, `LIGHTHOUSE_READER_DATABASE_URL` (for pgAdmin). The server's convention is `<PROJECT>_<ROLE>_DATABASE_URL`, the app's without a role. No separate password keys ([§10.1](#101-database-setup-once-by-hand)) |
@@ -576,7 +604,8 @@ Lighthouse's CLI follows the server's CLI conventions (clig.dev; modelled on Cov
 | Command | Usage | Notes |
 |---|---|---|
 | `list`, `ls`, `l` | `list` | Every project, newest deploy first (never deployed last): repository, what it deploys (commits or releases, and its tier), what runs (version and commit, or stopped), last deploy, last check; its last error, whether it's broken, tags waiting for `main` or moved, and no release yet |
-| `releases` | `releases <name> [tag]` | A project's version tags, newest first: commit, status ([§4.7](#47-releases)), since when, and why. With a tag: the GitHub Release text it will get, and a warning when its CHANGELOG section or date is missing |
+| `releases` | `releases <name> [tag]` | A project's version tags, newest first: commit, status ([§4.7](#47-releases)), since when, and its Release, the last error and next attempt, or why. With a tag: the GitHub Release text it will get, and a warning when its CHANGELOG section or date is missing |
+| `publish` | `publish <name> <tag> [--date YYYY-MM-DD] [--notes-from <ref>] [--yes]` | Asks first. Publish an existing tag's GitHub Release now, without deploying it (a backfill, marked as not verified by a deploy); never takes "latest" from a newer version. A failed attempt is tried again later |
 | `add` | `add <url> [--name <name>]` | Named after the repository (lowercase). `--name` only when that name is taken; on a terminal `add` asks instead. Names: letters, digits, `-`, `_`, up to 64. The URL may have `www.`, a trailing `/` or `.git`. Deployed on the next check |
 | `remove`, `rm` | `remove <name> [--keep] [--yes]` | Asks first. Stops watching it and removes its containers and networks (`docker compose down`); its data and images stay. `--keep` leaves the containers running, untracked |
 | `rename` | `rename <name> <new-name>` | Lighthouse's name only; repository and containers unchanged |
@@ -593,7 +622,7 @@ Lighthouse's CLI follows the server's CLI conventions (clig.dev; modelled on Cov
 | `stop` | `stop <name[:service]\|all> [--yes]` | Asks first. A whole project stopped stays down on purpose: not deployed or brought back until `start`, `restart` or `deploy` |
 | `restart` | `restart <name[:service]\|all> [--yes]` | `all` asks first |
 | `logs` | `logs <name[:service]> [lines]` | The last lines (50, up to 10,000) of each container, on stdout; with a heading per service when there are several |
-| `status` | `status` | Version, environment, startup state, automatic deploys, Cove, GitHub token, database and schema; then each project (running, degraded, stopped or missing; its commit, last deploy and check, or `broken`) with a line per service (state and health). Exits 1 and lists what needs attention when something does, including a tag waiting for `main` over 10 minutes, a moved tag, and a project with no release yet |
+| `status` | `status` | Version, environment, startup state, automatic deploys, Cove, GitHub token, database and schema; then each project (running, degraded, stopped or missing; its commit, last deploy and check, or `broken`) with a line per service (state and health). Exits 1 and lists what needs attention when something does, including a tag waiting for `main` over 10 minutes, a moved tag, a project with no release yet, a Release that failed to publish (or 3 times in a row), and publishing off while Releases wait. `Publishing:` says whether it's on |
 | `help`, `h` | `help [command\|setup\|failed\|rules]` | |
 | `exit`, `quit` | | Leave the shell |
 
@@ -821,6 +850,10 @@ Each deploy cleans up after itself: deploy folders other than the running versio
 | `<Verb> cancelled: no answer to the confirmation` | No terminal to ask on: use `docker exec -it`, or add `--yes` |
 | `Lighthouse is still starting (…)` | Every command but `status` waits for startup; `status` and `docker logs lighthouse` say what it's waiting for |
 | A project's last check: `GitHub: <what it asked>: 401 …` | The GitHub token is wrong or expired. Update `LIGHTHOUSE_GITHUB_TOKEN`, restart |
+| A Release: `… the GitHub App (GITHUB_APP_ID …) was rejected` | The App ID or key is wrong, or the key was deleted on GitHub: check `GITHUB_APP_ID`, `update LIGHTHOUSE_GITHUB_APP_SECRET` with a new key. Tried again hourly |
+| A Release: `Cove: LIGHTHOUSE_GITHUB_APP_SECRET isn't in Cove` | Create it ([§4.7](#47-releases) setup step 4) |
+| A Release stays `pending`: `the GitHub App isn't installed on …` | Install the App on that repository, or leave it off to not publish there |
+| A Release: `… lacks a permission (it needs Contents: read and write)` | Give the App Contents: Read and write, and accept the new permission on its installation |
 | `GitHub: 403 (… rate limit …)` or `429` | Rate limit (5,000 requests an hour per token). Checks send the last ETag, and an unchanged answer doesn't count, so this takes many projects changing at once. Raise `LIGHTHOUSE_POLL_INTERVAL`. Transient: retried after a wait |
 | A project isn't deployed, and its last error is `x-lighthouse: …` | The compose file's `x-lighthouse` block has a setting Lighthouse doesn't know ([§7.2](#72-lighthouse-settings-x-lighthouse)) |
 | A deploy fails at `backup` | `pg_dumpall` failed (the message has its last lines), or `/srv/backups` isn't writable. Nothing changed; it's tried again after a wait |
@@ -849,6 +882,7 @@ What protects what, and what is left to you. The risks accepted on purpose are i
 | Cove secrets | Lighthouse's own token, checked at startup; a project gets only its own keys and `SHARED_*` ([§7.1](#71-the-deploy-rules)); values only in process environments | Lighthouse's token can read every key (accepted, [§15](#15-known-limits-and-accepted-risks)) |
 | The host | The deploy rules refuse anything that reaches outside a project: privileges, host namespaces, devices, the Docker socket, other projects' folders, volumes and networks ([§7.1](#71-the-deploy-rules)); exceptions only in `policy.json`, reviewed in git | Lighthouse itself has the Docker socket (= root) |
 | The GitHub token | Fine-grained and read-only; stored in Cove, held in memory; only its length is logged | – |
+| The GitHub App's key | Stored in Cove, held in memory, never logged; installation tokens last an hour and cover one repository; the App is installed only where Releases are published | Whoever has the key can write the contents of those repositories (within their rulesets) until the key is replaced ([§4.7](#47-releases)) |
 | Lighthouse's Cove token | File mode 0600, written atomically by CoveClient; no project can mount it; useless off the server (Cove publishes no port) | Readable by root on the server |
 | The CLI | A Unix socket inside the container, mode 0600, never published; reached only with `docker exec` | Anyone who can `docker exec` can use it (they already have root) |
 | What the CLI can touch | Only watched projects' containers, found by their compose project | – |
@@ -922,6 +956,7 @@ These rules apply to every change, on every project on the server. They come fro
   | `00004_orchestrator` | `projects`: `deployed_version`, `highest_version`, `deploy_mode`, `tier`, `stopped`; `deployments`: `version`, the `reconcile` trigger |
   | `00005_held_commit` | `projects.held_sha`: the commit a rollback went back from, which checks don't redeploy |
   | `00006_releases` | `releases` (read, add and update for the app) and `projects.releases_tracked_at` ([§4.7](#47-releases)); `deployments`: the `retry` trigger |
+  | `00007_publishing` | `releases`: publishing attempts, the Release's URL, backfills |
 
   `lighthouse migrate status` lists them with the time each was applied.
 

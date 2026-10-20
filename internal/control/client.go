@@ -197,6 +197,13 @@ func (c *Client) ReleaseNotes(ctx context.Context, name string, tag string) (Rel
 	return notes, err
 }
 
+func (c *Client) Publish(ctx context.Context, name string, tag string, date string, notesFrom string) (Release, error) {
+	var rel Release
+	err := c.call(ctx, http.MethodPost, project(name)+"/releases/"+url.PathEscape(tag)+"/publish",
+		map[string]string{"date": date, "notesFrom": notesFrom}, &rel)
+	return rel, err
+}
+
 func (c *Client) Scan(ctx context.Context) error {
 	return c.call(ctx, http.MethodPost, "/v1/scan", nil, nil)
 }

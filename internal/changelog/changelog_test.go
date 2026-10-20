@@ -79,4 +79,7 @@ func TestNotes(t *testing.T) {
 	if _, warnings := Notes(nil, "v1.0.0", published); len(warnings) != 1 || !strings.Contains(warnings[0], "there's no CHANGELOG.md") {
 		t.Errorf("no file: %q", warnings)
 	}
+	if body, warnings := NotesDated([]byte(sample), "v1.3.0", time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC)); !strings.HasPrefix(body, "## v1.3.0 (2025-01-02)\n\nShort summary.") || len(warnings) != 0 {
+		t.Errorf("NotesDated = %q, %q", body, warnings)
+	}
 }

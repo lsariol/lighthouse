@@ -15,6 +15,7 @@ import (
 	"github.com/lsariol/lighthouse/internal/github"
 	"github.com/lsariol/lighthouse/internal/projects"
 	"github.com/lsariol/lighthouse/internal/projects/projectstest"
+	"github.com/lsariol/lighthouse/internal/release"
 	"github.com/lsariol/lighthouse/internal/settings"
 )
 
@@ -26,6 +27,7 @@ type fakeRepo struct {
 	down      bool
 	offBranch map[string]bool   // commits not on the default branch
 	files     map[string]string // other files at the top, the same at every commit
+	releases  []github.Release  // its GitHub Releases
 }
 
 // fakeGitHub serves repositories by name, honouring ETags, and counts
@@ -146,6 +148,61 @@ func (g *fakeGitHub) Contains(ctx context.Context, r github.Repo, head string, s
 	}
 	g.calls["compare"]++
 	return !rp.offBranch[sha], nil
+}
+
+func (g *fakeGitHub) TagCommit(ctx context.Context, r github.Repo, tag string, token string) (string, bool, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	rp, err := g.repo(r, token)
+	if err != nil {
+		return "", false, err
+	}
+	t, ok := release.Find(rp.tags, tag)
+	return t.SHA, ok, nil
+}
+
+func (g *fakeGitHub) ReleaseByTag(ctx context.Context, r github.Repo, tag string, token string) (github.Release, bool, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	rp, err := g.repo(r, token)
+	if err != nil {
+		return github.Release{}, false, err
+	}
+	for _, rel := range rp.releases {
+		if rel.Tag == tag {
+			return rel, true, nil
+		}
+	}
+	return github.Release{}, false, nil
+}
+
+func (g *fakeGitHub) Releases(ctx context.Context, r github.Repo, token string) ([]github.Release, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	rp, err := g.repo(r, token)
+	if err != nil {
+		return nil, err
+	}
+	return append([]github.Release(nil), rp.releases...), nil
+}
+
+// fakePublisher creates Releases on the fake GitHub, or fails with err.
+type fakePublisher struct {
+	gh      *fakeGitHub
+	err     error
+	created []github.NewRelease
+}
+
+func (f *fakePublisher) Publish(ctx context.Context, r github.Repo, rel github.NewRelease) (github.Release, error) {
+	if f.err != nil {
+		return github.Release{}, f.err
+	}
+	f.gh.mu.Lock()
+	defer f.gh.mu.Unlock()
+	f.created = append(f.created, rel)
+	out := github.Release{ID: int64(len(f.created)), Tag: rel.Tag, URL: "https://github.com/o/" + r.Name + "/releases/tag/" + rel.Tag, Prerelease: rel.Prerelease}
+	f.gh.repos[r.Name].releases = append(f.gh.repos[r.Name].releases, out)
+	return out, nil
 }
 
 // releases is a compose file that deploys release tags.

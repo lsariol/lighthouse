@@ -58,6 +58,16 @@ func Find(text []byte, version string) (Section, bool) {
 // website reads: the CHANGELOG's date, else published. Warnings say what was
 // missing.
 func Notes(text []byte, version string, published time.Time) (string, []string) {
+	return notes(text, version, published, false)
+}
+
+// NotesDated is Notes with date in the heading, whatever the CHANGELOG says
+// (a backfill keeping a version's original date).
+func NotesDated(text []byte, version string, date time.Time) (string, []string) {
+	return notes(text, version, date, true)
+}
+
+func notes(text []byte, version string, published time.Time, force bool) (string, []string) {
 	var warnings []string
 	s, found := Find(text, version)
 	switch {
@@ -65,6 +75,9 @@ func Notes(text []byte, version string, published time.Time) (string, []string) 
 		warnings = append(warnings, "there's no "+File+"; the notes say \""+NoNotes+"\"")
 	case !found:
 		warnings = append(warnings, File+" has no section for "+version+"; the notes say \""+NoNotes+"\"")
+	}
+	if force {
+		s.Date = published.Format(time.DateOnly)
 	}
 	if s.Date == "" {
 		s.Date = published.Format(time.DateOnly)

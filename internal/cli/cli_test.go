@@ -126,6 +126,18 @@ func (f *fakeService) ReleaseNotes(ctx context.Context, name string, tag string)
 		Warnings: []string{"the " + tag + " heading has no date"}}, f.act("release notes "+tag, name)
 }
 
+func (f *fakeService) Publish(ctx context.Context, name string, tag string, date string, notesFrom string) (control.Release, error) {
+	if err := f.act(strings.TrimSpace("publish "+tag+" "+date+" "+notesFrom), name); err != nil {
+		return control.Release{}, err
+	}
+	if tag == "v0.0.1" {
+		next := time.Now().Add(time.Minute)
+		return control.Release{Tag: tag, Status: "pending", Error: "GitHub: 502 Bad Gateway", NextAttempt: &next}, nil
+	}
+	return control.Release{Tag: tag, Status: "published", URL: "https://github.com/o/" + name + "/releases/tag/" + tag, Backfill: true,
+		Note: "published with `publish`, not verified by a deploy"}, nil
+}
+
 // run executes one command line on a CLI without a terminal and returns its
 // stdout, stderr and error.
 func run(t *testing.T, svc control.Service, line string) (string, string, error) {
@@ -323,6 +335,55 @@ func TestReleases(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "v1.3.0") {
 		t.Errorf("a tag that just started waiting needs attention: %v", err)
+	}
+}
+
+func TestPublish(t *testing.T) {
+	svc := newFake("cove")
+	if _, _, err := run(t, svc, "publish cove v1.0.0"); err == nil || !strings.Contains(err.Error(), "Use --yes to publish") || len(svc.calls) != 0 {
+		t.Errorf("publish without a terminal = %v, calls %v", err, svc.calls)
+	}
+	_, errOut, err := run(t, svc, "publish cove v1.0.0 --date 2025-01-02 --notes-from main -y")
+	if err != nil || svc.calls[0] != "publish v1.0.0 2025-01-02 main cove" || !strings.Contains(errOut, `✓ Published "cove" v1.0.0: https://github.com/o/cove/releases/tag/v1.0.0`) ||
+		!strings.Contains(errOut, "Published with `publish`, not verified by a deploy.") {
+		t.Errorf("publish: %v, calls %v\n%s", err, svc.calls, errOut)
+	}
+	_, errOut, err = run(t, svc, "publish cove v0.0.1 --yes")
+	if err != nil || !strings.Contains(errOut, `! "cove" v0.0.1 isn't published yet: GitHub: 502 Bad Gateway (tried again `) {
+		t.Errorf("a failed attempt: %v\n%s", err, errOut)
+	}
+	var usage usageError
+	for _, line := range []string{"publish cove", "publish cove v1.0.0 --date", "publish cove v1.0.0 extra --yes"} {
+		if _, _, err := run(t, newFake("cove"), line); !errors.As(err, &usage) {
+			t.Errorf("%s = %v, want a usage error", line, err)
+		}
+	}
+
+	next := time.Now().Add(time.Hour)
+	svc.projects[0].OpenReleases = []control.Release{
+		{Tag: "v1.1.0", Status: "failed", Error: "GitHub: 403 Forbidden. The App lacks a permission", NextAttempt: &next},
+		{Tag: "v1.2.0", Status: "pending", Attempts: 1, Error: "GitHub: 502 Bad Gateway", NextAttempt: &next},
+		{Tag: "v1.3.0", Status: "pending", Attempts: 4, Error: "GitHub: 502 Bad Gateway", NextAttempt: &next},
+	}
+	_, errOut, _ = run(t, svc, "list")
+	for _, want := range []string{`! "cove" v1.1.0 failed to publish: GitHub: 403 Forbidden. The App lacks a permission (tried again `, `! "cove" v1.2.0 isn't published yet: GitHub: 502`} {
+		if !strings.Contains(errOut, want) {
+			t.Errorf("list lacks %q:\n%s", want, errOut)
+		}
+	}
+	svc.status.Projects, svc.status.Publishing, svc.status.Unpublished = svc.projects, "off: GITHUB_APP_ID isn't set", 2
+	out, _, err := run(t, svc, "status")
+	if !strings.Contains(out, "Publishing:") || err == nil {
+		t.Fatalf("status: %v\n%s", err, out)
+	}
+	for _, want := range []string{`"cove" v1.1.0 failed to publish ("releases cove")`, `"cove" v1.3.0 failed to publish 4 times in a row`,
+		"publishing is off: GITHUB_APP_ID isn't set, and 2 releases wait to be published"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("status lacks %q: %v", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), "v1.2.0") {
+		t.Errorf("one passing failure needs attention: %v", err)
 	}
 }
 

@@ -58,6 +58,13 @@ func (c *CLI) status(ctx context.Context, args []string) error {
 	if s.Schema != "" {
 		rows = append(rows, [2]string{"Schema", s.Schema})
 	}
+	if s.Publishing != "" {
+		rows = append(rows, [2]string{"Publishing", s.Publishing})
+		if strings.HasPrefix(s.Publishing, "off") && s.Unpublished > 0 {
+			problems = append(problems, fmt.Sprintf("publishing is %s, and %d %s to be published", s.Publishing,
+				s.Unpublished, plural(s.Unpublished, "release waits", "releases wait")))
+		}
+	}
 	fields(rows)
 
 	switch {

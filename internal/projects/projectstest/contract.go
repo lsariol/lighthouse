@@ -367,6 +367,69 @@ func RunStoreTests(t *testing.T, open func(t *testing.T) projects.Store) {
 		}
 	})
 
+	t.Run("Publishing", func(t *testing.T) {
+		s := open(t)
+		s.Add(ctx, "cove", cove)
+		s.TrackReleases(ctx, "cove", []projects.Release{
+			{Tag: "v1.0.0", SHA: "s100", Status: projects.ReleaseKnown},
+			{Tag: "v1.1.0", SHA: "s110", Status: projects.ReleasePending},
+			{Tag: "v1.2.0", SHA: "s120", Status: projects.ReleasePending},
+		})
+		now := time.Now().Truncate(time.Second)
+		tags := func(list []projects.Release) string {
+			var out []string
+			for _, r := range list {
+				out = append(out, r.Tag)
+			}
+			return strings.Join(out, ",")
+		}
+		if due, err := s.DueReleases(ctx, now); err != nil || tags(due) != "v1.1.0,v1.2.0" {
+			t.Fatalf("due = %s, %v", tags(due), err)
+		}
+
+		later := now.Add(time.Hour)
+		if err := s.RecordPublish(ctx, "COVE", "v1.1.0", projects.Published{Status: projects.ReleasePending, Error: "502 Bad Gateway", NextAttempt: &later, At: now}); err != nil {
+			t.Fatal(err)
+		}
+		s.RecordPublish(ctx, "cove", "v1.1.0", projects.Published{Status: projects.ReleasePending, Error: "502 again", NextAttempt: &later, At: now})
+		s.RecordPublish(ctx, "cove", "v1.2.0", projects.Published{Status: projects.ReleasePublished, Note: "adopted", URL: "https://r/v1.2.0", At: now})
+		if due, _ := s.DueReleases(ctx, now); len(due) != 0 {
+			t.Errorf("due after the attempts: %s", tags(due))
+		}
+		if due, _ := s.DueReleases(ctx, later); tags(due) != "v1.1.0" || due[0].Attempts != 2 || due[0].LastError != "502 again" || !due[0].NextAttempt.Equal(later) {
+			t.Errorf("due an hour later: %+v", due)
+		}
+		list, _ := s.Releases(ctx, "cove")
+		if r := list[2]; r.Status != projects.ReleasePublished || r.URL != "https://r/v1.2.0" || r.PublishedAt == nil || !r.PublishedAt.Equal(now) ||
+			r.Note != "adopted" || r.Attempts != 0 || r.LastError != "" {
+			t.Errorf("published: %+v", r)
+		}
+
+		s.RecordPublish(ctx, "cove", "v1.1.0", projects.Published{Status: projects.ReleaseFailed, Error: "403", NextAttempt: &later, At: now})
+		if due, _ := s.DueReleases(ctx, later); tags(due) != "v1.1.0" {
+			t.Errorf("a failed release isn't due again: %s", tags(due))
+		}
+		s.RecordPublish(ctx, "cove", "v1.1.0", projects.Published{Status: projects.ReleaseFailed, Error: "the tag is gone", At: now})
+		if due, _ := s.DueReleases(ctx, later.Add(24*time.Hour)); len(due) != 0 {
+			t.Errorf("a failed release with no next attempt is due: %s", tags(due))
+		}
+		if err := s.RecordPublish(ctx, "cove", "v9.0.0", projects.Published{Status: projects.ReleasePublished}); !errors.Is(err, projects.ErrNoRelease) {
+			t.Errorf("RecordPublish of a missing tag = %v", err)
+		}
+
+		if err := s.QueueBackfill(ctx, "cove", projects.Release{Tag: "v1.0.0", SHA: "s100", NotesRef: "main", NotesDate: "2025-01-02"}); err != nil {
+			t.Fatal(err)
+		}
+		s.QueueBackfill(ctx, "cove", projects.Release{Tag: "v0.9.0", SHA: "s090"})
+		due, _ := s.DueReleases(ctx, time.Now().Add(time.Second))
+		if tags(due) != "v1.0.0,v0.9.0" || !due[0].Backfill || due[0].NotesRef != "main" || due[0].NotesDate != "2025-01-02" || due[1].SHA != "s090" || due[1].NotesDate != "" {
+			t.Errorf("backfills: %+v", due)
+		}
+		if err := s.QueueBackfill(ctx, "gone", projects.Release{Tag: "v1.0.0"}); !errors.Is(err, projects.ErrNotFound) {
+			t.Errorf("QueueBackfill of a missing project = %v", err)
+		}
+	})
+
 	t.Run("ComposeProject", func(t *testing.T) {
 		s := open(t)
 		s.Add(ctx, "personalWebsite", github.Repo{Owner: "lsariol", Name: "Landing"})

@@ -11,7 +11,7 @@ import (
 func setEnv(t *testing.T, vars map[string]string) {
 	t.Helper()
 	for _, name := range []string{"COVE_URL", "COVE_TOKEN_PATH", "STAGING_PATH", "STORAGE_PATH",
-		"APP_ENV", "LIGHTHOUSE_VERSION", "LIGHTHOUSE_CONTROL_SOCKET", "LIGHTHOUSE_POLL_INTERVAL"} {
+		"APP_ENV", "LIGHTHOUSE_VERSION", "LIGHTHOUSE_CONTROL_SOCKET", "LIGHTHOUSE_POLL_INTERVAL", "GITHUB_APP_ID"} {
 		t.Setenv(name, vars[name])
 	}
 	t.Setenv("APP_ENV_PATH", t.TempDir()+"/missing.env")
@@ -47,6 +47,20 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if err := cfg.ValidateServe(); err != nil {
 		t.Errorf("ValidateServe: %v", err)
+	}
+}
+
+func TestGitHubAppID(t *testing.T) {
+	vars := valid()
+	vars["GITHUB_APP_ID"] = " 123456 "
+	setEnv(t, vars)
+	if cfg, _ := Load(); cfg.GitHubAppID != "123456" || cfg.ValidateServe() != nil {
+		t.Errorf("GitHubAppID = %q, %v", cfg.GitHubAppID, cfg.ValidateServe())
+	}
+	vars["GITHUB_APP_ID"] = "Iv23liAbC"
+	setEnv(t, vars)
+	if cfg, _ := Load(); cfg.ValidateServe() == nil || !strings.Contains(cfg.ValidateServe().Error(), "not its Client ID") {
+		t.Errorf("a Client ID = %v", cfg.ValidateServe())
 	}
 }
 

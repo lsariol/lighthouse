@@ -26,6 +26,7 @@ type Config struct {
 	Version       string
 	ControlSocket string
 	PollInterval  time.Duration
+	GitHubAppID   string // the GitHub App that publishes Releases; "" turns publishing off
 }
 
 const (
@@ -56,6 +57,7 @@ func Load() (Config, error) {
 		Version:       env("LIGHTHOUSE_VERSION"),
 		ControlSocket: env("LIGHTHOUSE_CONTROL_SOCKET"),
 		PollInterval:  defaultPollInterval,
+		GitHubAppID:   env("GITHUB_APP_ID"),
 	}
 	if cfg.ControlSocket == "" {
 		cfg.ControlSocket = defaultControlSocket
@@ -119,6 +121,10 @@ func (c Config) ValidateServe() error {
 	// Emptied on every deploy: refuse anything that isn't clearly a scratch folder.
 	if err := checkWorkFolder(c.StagingPath); err != nil {
 		return fmt.Errorf("STAGING_PATH %q: %v", c.StagingPath, err)
+	}
+
+	if c.GitHubAppID != "" && strings.Trim(c.GitHubAppID, "0123456789") != "" {
+		return fmt.Errorf("GITHUB_APP_ID %q isn't a number: use the App ID from the App's settings page on GitHub (not its Client ID)", c.GitHubAppID)
 	}
 
 	if c.PollInterval < minPollInterval {

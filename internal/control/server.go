@@ -118,6 +118,14 @@ func Handler(svc Service) http.Handler {
 		notes, err := svc.ReleaseNotes(r.Context(), r.PathValue("name"), r.PathValue("tag"))
 		respond(w, notes, err)
 	})
+	mux.HandleFunc("POST /v1/projects/{name}/releases/{tag}/publish", func(w http.ResponseWriter, r *http.Request) {
+		var body struct{ Date, NotesFrom string }
+		if !decode(w, r, &body) {
+			return
+		}
+		rel, err := svc.Publish(r.Context(), r.PathValue("name"), r.PathValue("tag"), body.Date, body.NotesFrom)
+		respond(w, rel, err)
+	})
 
 	global := map[string]func(context.Context) error{
 		"scan":   svc.Scan,

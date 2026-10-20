@@ -226,6 +226,26 @@ func commandTable(embedded bool) []command {
 			complete: names,
 		},
 		{
+			names:    []string{"publish"},
+			group:    groupDeploying,
+			synopsis: "<name> <tag> [--yes]",
+			summary:  "Publish a GitHub Release for an old tag",
+			usages: []usage{
+				{"publish <name> <tag> [--date YYYY-MM-DD] [--notes-from <ref>] [--yes]", "Publish a GitHub Release for an existing tag now, without deploying it: for versions from before Lighthouse published Releases, or one that was deployed by hand. Asks first. It's marked as not verified by a deploy, and never takes \"latest\" from a newer version. A failed attempt is tried again later."},
+			},
+			flags: []flag{
+				{"--date YYYY-MM-DD", "The date in the Release's heading, over the CHANGELOG's (keep an old version's own date)."},
+				{"--notes-from <ref>", "Read CHANGELOG.md at this branch or commit instead of at the tag (a CHANGELOG written later)."},
+				yes,
+			},
+			examples: []example{
+				{"publish cove v1.0.0", "the version that ran before Releases were published"},
+				{"publish crossframe v1.0.0 --date 2025-03-01 --notes-from main", "an old version, with its own date"},
+			},
+			run:      (*CLI).publish,
+			complete: names,
+		},
+		{
 			names:    []string{"report"},
 			group:    groupDeploying,
 			synopsis: "<name> [n]",

@@ -122,6 +122,10 @@ func (d *Daemon) Status(ctx context.Context) (control.Status, error) {
 	}
 	s.Paused = o.IsPaused()
 	s.GitHubToken = true
+	s.Publishing = "on (GitHub App " + d.cfg.GitHubAppID + ")"
+	if on, why := o.Publishing(); !on {
+		s.Publishing = "off: " + why
+	}
 
 	s.Database = "reachable"
 	if err := health.Ping(ctx); err != nil {
@@ -145,6 +149,14 @@ func (d *Daemon) Status(ctx context.Context) (control.Status, error) {
 		d.addServices(ctx, &list[i])
 	}
 	s.Projects = list
+	store, _, _ := d.parts()
+	if all, err := store.Releases(ctx, ""); err == nil {
+		for _, r := range all {
+			if r.Status == projects.ReleasePending {
+				s.Unpublished++
+			}
+		}
+	}
 	return s, nil
 }
 
@@ -200,7 +212,9 @@ func (d *Daemon) Projects(ctx context.Context) ([]control.Project, error) {
 		cp := toProject(p)
 		stable := false
 		for _, r := range byProject[strings.ToLower(p.Name)] {
-			if r.Status == projects.ReleaseWaiting || r.Status == projects.ReleaseMoved {
+			switch {
+			case r.Status == projects.ReleaseWaiting, r.Status == projects.ReleaseMoved, r.Status == projects.ReleaseFailed,
+				r.Status == projects.ReleasePending && r.LastError != "":
 				cp.OpenReleases = append(cp.OpenReleases, toRelease(r))
 			}
 			if _, ok := release.Parse(r.Tag); ok {
@@ -214,7 +228,36 @@ func (d *Daemon) Projects(ctx context.Context) ([]control.Project, error) {
 }
 
 func toRelease(r projects.Release) control.Release {
-	return control.Release{Tag: r.Tag, Commit: r.SHA, Status: r.Status, Note: r.Note, Since: r.UpdatedAt}
+	return control.Release{Tag: r.Tag, Commit: r.SHA, Status: r.Status, Note: r.Note, Since: r.UpdatedAt,
+		Attempts: r.Attempts, Error: r.LastError, NextAttempt: r.NextAttempt, URL: r.URL, Backfill: r.Backfill}
+}
+
+func (d *Daemon) Publish(ctx context.Context, name string, tag string, date string, notesFrom string) (control.Release, error) {
+	_, o, err := d.parts()
+	if err != nil {
+		return control.Release{}, err
+	}
+	if _, err := d.find(ctx, name); err != nil {
+		return control.Release{}, err
+	}
+	r, err := o.Backfill(ctx, name, tag, date, notesFrom)
+	switch {
+	case errors.Is(err, orchestrator.ErrPublishingOff):
+		return control.Release{}, control.Errorf(control.KindUnavailable, "%s. Create the GitHub App and set GITHUB_APP_ID (DOCUMENTATION.md §4.7).", sentenceStart(err.Error()))
+	case err != nil && r.Tag != "":
+		return toRelease(r), control.Errorf(control.KindConflict, "%s.", sentenceStart(err.Error()))
+	case err != nil:
+		return control.Release{}, control.Errorf(control.KindInvalid, "%s.", sentenceStart(err.Error()))
+	}
+	return toRelease(r), nil
+}
+
+// sentenceStart capitalizes s's first letter.
+func sentenceStart(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }
 
 func (d *Daemon) Releases(ctx context.Context, name string) ([]control.Release, error) {

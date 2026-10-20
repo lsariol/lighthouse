@@ -338,6 +338,67 @@ func (s *Store) SetReleaseStatus(ctx context.Context, name string, tag string, s
 	return projects.ErrNoRelease
 }
 
+func (s *Store) DueReleases(ctx context.Context, now time.Time) ([]projects.Release, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var due []projects.Release
+	for _, r := range s.releases {
+		switch {
+		case r.Status == projects.ReleasePending && (r.NextAttempt == nil || !r.NextAttempt.After(now)),
+			r.Status == projects.ReleaseFailed && r.NextAttempt != nil && !r.NextAttempt.After(now):
+			due = append(due, r)
+		}
+	}
+	return due, nil
+}
+
+func (s *Store) RecordPublish(ctx context.Context, name string, tag string, p projects.Published) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	i := s.index(name)
+	if i < 0 {
+		return projects.ErrNotFound
+	}
+	for k, r := range s.releases {
+		if r.Project != s.projects[i].Name || r.Tag != tag {
+			continue
+		}
+		r.Status, r.Note, r.LastError, r.NextAttempt, r.UpdatedAt = p.Status, p.Note, p.Error, p.NextAttempt, time.Now()
+		r.Attempts++
+		if p.Error == "" {
+			r.Attempts = 0
+		}
+		if p.Status == projects.ReleasePublished {
+			at := p.At
+			r.URL, r.PublishedAt = p.URL, &at
+		}
+		s.releases[k] = r
+		return nil
+	}
+	return projects.ErrNoRelease
+}
+
+func (s *Store) QueueBackfill(ctx context.Context, name string, r projects.Release) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	i := s.index(name)
+	if i < 0 {
+		return projects.ErrNotFound
+	}
+	now := time.Now()
+	for k, old := range s.releases {
+		if old.Project == s.projects[i].Name && old.Tag == r.Tag {
+			old.Status, old.Note, old.Backfill, old.NotesRef, old.NotesDate = projects.ReleasePending, "", true, r.NotesRef, r.NotesDate
+			old.Attempts, old.LastError, old.NextAttempt, old.UpdatedAt = 0, "", &now, now
+			s.releases[k] = old
+			return nil
+		}
+	}
+	s.releases = append(s.releases, projects.Release{Project: s.projects[i].Name, Tag: r.Tag, SHA: r.SHA, Status: projects.ReleasePending,
+		Backfill: true, NotesRef: r.NotesRef, NotesDate: r.NotesDate, NextAttempt: &now, CreatedAt: now, UpdatedAt: now})
+	return nil
+}
+
 // newest returns the project's deployments, newest first.
 func (s *Store) newest(project string) []projects.Deployment {
 	var list []projects.Deployment
