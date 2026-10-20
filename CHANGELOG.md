@@ -2,7 +2,7 @@
 
 All notable changes to Lighthouse. Versions follow [semantic versioning](https://semver.org).
 
-## v1.1.0 (unreleased)
+## v1.1.0 (2026-10-20)
 
 Lighthouse publishes a GitHub Release for each version it deploys and verifies, through a GitHub App you own.
 
