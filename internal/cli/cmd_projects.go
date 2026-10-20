@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/lsariol/lighthouse/internal/control"
 )
@@ -21,6 +22,7 @@ func (c *CLI) list(ctx context.Context, args []string) error {
 		info("No projects are watched yet. Add one with \"add <url>\" (see \"help setup\").")
 		return nil
 	}
+	slices.SortStableFunc(projects, newestDeployFirst)
 
 	rows := [][]string{{"NAME", "REPOSITORY", "DEPLOYS", "RUNNING", "DEPLOYED", "CHECKED"}}
 	for _, p := range projects {
@@ -42,6 +44,20 @@ func (c *CLI) list(ctx context.Context, args []string) error {
 		}
 	}
 	return nil
+}
+
+// newestDeployFirst orders projects by last deploy, newest first, with
+// never-deployed projects last.
+func newestDeployFirst(a, b control.Project) int {
+	switch {
+	case a.LastDeployed == nil && b.LastDeployed == nil:
+		return 0
+	case a.LastDeployed == nil:
+		return 1
+	case b.LastDeployed == nil:
+		return -1
+	}
+	return b.LastDeployed.Compare(*a.LastDeployed)
 }
 
 func (c *CLI) add(ctx context.Context, args []string) error {

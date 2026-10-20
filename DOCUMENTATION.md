@@ -550,7 +550,7 @@ Lighthouse's CLI follows the server's CLI conventions (clig.dev; modelled on Cov
 
 | Command | Usage | Notes |
 |---|---|---|
-| `list`, `ls`, `l` | `list` | Every project: repository, what it deploys (commits or releases, and its tier), what runs (version and commit, or stopped), last deploy, last check; its last error, and whether it's broken |
+| `list`, `ls`, `l` | `list` | Every project, newest deploy first (never deployed last): repository, what it deploys (commits or releases, and its tier), what runs (version and commit, or stopped), last deploy, last check; its last error, and whether it's broken |
 | `add` | `add <url> [--name <name>]` | Named after the repository (lowercase). `--name` only when that name is taken; on a terminal `add` asks instead. Names: letters, digits, `-`, `_`, up to 64. The URL may have `www.`, a trailing `/` or `.git`. Deployed on the next check |
 | `remove`, `rm` | `remove <name> [--keep] [--yes]` | Asks first. Stops watching it and removes its containers and networks (`docker compose down`); its data and images stay. `--keep` leaves the containers running, untracked |
 | `rename` | `rename <name> <new-name>` | Lighthouse's name only; repository and containers unchanged |

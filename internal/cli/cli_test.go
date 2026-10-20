@@ -254,6 +254,23 @@ func TestListShowsReleasesAndStopped(t *testing.T) {
 	}
 }
 
+func TestListNewestDeployFirst(t *testing.T) {
+	svc := newFake("never", "old", "new", "mid", "unset")
+	now := time.Now()
+	for i, ago := range map[int]time.Duration{1: 48 * time.Hour, 2: time.Minute, 3: time.Hour} {
+		at := now.Add(-ago)
+		svc.projects[i].LastDeployed = &at
+	}
+	out, _, err := run(t, svc, "list")
+	var names []string
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n")[1:] {
+		names = append(names, strings.Fields(line)[0])
+	}
+	if want := []string{"new", "mid", "old", "never", "unset"}; err != nil || !slices.Equal(names, want) {
+		t.Errorf("list order = %v, want %v (%v)\n%s", names, want, err, out)
+	}
+}
+
 // Without a terminal, destructive commands refuse instead of guessing, and
 // --yes goes ahead.
 func TestConfirmation(t *testing.T) {

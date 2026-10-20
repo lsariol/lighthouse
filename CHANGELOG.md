@@ -2,6 +2,11 @@
 
 All notable changes to Lighthouse. Versions follow [semantic versioning](https://semver.org).
 
+## v1.0.3
+
+### Changed
+- **`list` shows the newest deploy first.** Projects that have never deployed come last, by name.
+
 ## v1.0.2
 
 ### Fixed

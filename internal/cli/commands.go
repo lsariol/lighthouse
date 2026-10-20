@@ -84,7 +84,7 @@ func commandTable(embedded bool) []command {
 			names:    []string{"list", "ls", "l"},
 			group:    groupProjects,
 			summary:  "Watched projects and their last deploy",
-			usages:   []usage{{"list", "List every watched project with its repository, deployed commit, last deploy and last check, and any error from the last check."}},
+			usages:   []usage{{"list", "List every watched project, newest deploy first, with its repository, deployed commit, last deploy and last check, and any error from the last check."}},
 			examples: []example{{"list", "everything Lighthouse watches"}},
 			run:      (*CLI).list,
 		},
