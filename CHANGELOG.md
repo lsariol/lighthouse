@@ -2,6 +2,11 @@
 
 All notable changes to Lighthouse. Versions follow [semantic versioning](https://semver.org).
 
+## v1.0.4 (unreleased)
+
+### Changed
+- **Tests run in the Dockerfile's `test` stage instead of GitHub Actions.** Every deploy of Lighthouse runs gofmt, vet and the tests with `-race` first, and a failure stops the deploy. The database tests, `govulncheck` and the checks that need Docker run locally (DOCUMENTATION.md §13.1).
+
 ## v1.0.3 (2026-10-20)
 
 ### Changed

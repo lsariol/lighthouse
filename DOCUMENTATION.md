@@ -144,12 +144,12 @@ internal/
   github/                  Repository URLs, commits, tags, a compose file, a commit's tarball
   cove/                    Connecting to Cove at startup; Lighthouse's own secrets
 scripts/
-  db/                      Admin SQL for sparkdb, run by hand (§10.1); CI uses it too
+  db/                      Admin SQL for sparkdb, run by hand (§10.1); test-db.sh uses it too
   test-db.sh               A throwaway Postgres for the integration tests (§13.1)
   e2e-self-update.sh       The self-update end to end against the local Docker (§4.6)
-Dockerfile                 golang:1.27.1-alpine → alpine:3.24 + docker-cli, compose, buildx
+Dockerfile                 golang:1.27.1-alpine → alpine:3.24 + docker-cli, compose, buildx;
+                           a test stage (gofmt, vet, tests with -race) that every deploy of Lighthouse runs
 docker-compose.yml         Lighthouse's own service: mounts, healthcheck, x-lighthouse
-.github/workflows/ci.yml   gofmt, vet, tests with -race (Postgres, Docker), govulncheck, builds
 ```
 
 **Dependencies point one way:**
@@ -847,14 +847,14 @@ Success: the daemon logs `Lighthouse starting`, then `waiting for …` or `Light
 
 **Everything stays in the repository.** A local run reads and writes only inside `.dev/`: the staging, storage and backup folders, the control socket and the dev Cove token. Its database is `lighthouse_db` on `sparkdb-dev`, through the URLs in the dev Cove. `.dev/` is gitignored and kept out of Docker builds. Go tests use temporary folders that the test runner removes afterwards.
 
-**Checks before a commit** (CI runs the same on every push to `main` and `release/**`):
+**Checks before a commit.** The Dockerfile's `test` stage runs gofmt, vet and the tests with `-race` before every deploy of Lighthouse, and a failure stops the deploy. It can't run the database tests (no Postgres in a build), `govulncheck`, or the checks that need Docker, so run those here:
 
 ```bash
 gofmt -l .                       # prints nothing
 go vet ./...
 scripts/test-db.sh up            # once: a throwaway Postgres, set up by scripts/db/setup.sql
 eval "$(scripts/test-db.sh env)" # in each new shell: points the integration tests at it
-go test -race ./...              # -race needs cgo: gcc on Windows (msys2), or run in CI
+go test -race ./...              # -race needs cgo: gcc on Windows (msys2), or: docker build --target test .
 go run golang.org/x/vuln/cmd/govulncheck@latest ./...   # "No vulnerabilities found."
 scripts/test-db.sh down          # when done
 scripts/e2e-self-update.sh       # optional: the self-update end to end against Docker ("PASS")

@@ -16,7 +16,7 @@ import (
 )
 
 // The integration tests run against a real, disposable Postgres set up with
-// scripts/db/setup.sql (scripts/test-db.sh does it; CI too). Without these
+// scripts/db/setup.sql (scripts/test-db.sh does it). Without these
 // variables they're skipped.
 var (
 	migratorURL = os.Getenv("LIGHTHOUSE_TEST_MIGRATOR_DATABASE_URL")
