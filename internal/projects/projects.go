@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/lsariol/lighthouse/internal/github"
+	"github.com/lsariol/lighthouse/internal/release"
 )
 
 // Project is one watched repository and what Lighthouse knows about it.
@@ -38,6 +39,8 @@ type Project struct {
 	HeldSHA string
 
 	Stopped bool
+
+	ReleasesTracked bool // its existing version tags were recorded (the baseline)
 }
 
 // ComposeName is p's compose project: as last deployed, else the repository's name.
@@ -97,6 +100,66 @@ const (
 	StepSkipped   = "skipped"
 )
 
+// Release is one version tag of a project, and what Lighthouse made of it.
+type Release struct {
+	Project   string
+	Tag       string
+	SHA       string
+	Status    string
+	Note      string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// What Lighthouse made of a version tag.
+const (
+	ReleaseKnown      = "known"      // there at the baseline, a pre-release, or deployed by hand: never published automatically
+	ReleaseWaiting    = "waiting"    // its commit isn't on the default branch yet
+	ReleaseReady      = "ready"      // on the default branch and newer than what's deployed: checks deploy it
+	ReleasePending    = "pending"    // deployed by a check; its GitHub Release is due
+	ReleasePublished  = "published"  // its GitHub Release exists
+	ReleaseFailed     = "failed"     // publishing it failed
+	ReleaseSuperseded = "superseded" // never deployed: a newer release was, or it's lower than one that was
+	ReleaseMoved      = "moved"      // the tag now points at another commit; it isn't deployed or published
+)
+
+// DeployedReleases returns the rows of a project's tracked tags (rows) that
+// d changes, and the row it adds, as RecordDeployment describes.
+func DeployedReleases(rows []Release, d Deployment) []Release {
+	v, ok := release.Parse(d.Version)
+	if d.Status != StatusSucceeded || !ok {
+		return nil
+	}
+	var changed []Release
+	found := false
+	for _, r := range rows {
+		if r.Tag == d.Version {
+			found = true
+			switch {
+			case d.Trigger == TriggerCheck && r.Status != ReleasePending && r.Status != ReleasePublished:
+				r.Status, r.Note = ReleasePending, ""
+			case d.Trigger == TriggerManual && (r.Status == ReleaseReady || r.Status == ReleaseWaiting):
+				r.Status, r.Note = ReleaseKnown, "deployed by hand, so it isn't published automatically"
+			default:
+				continue
+			}
+			changed = append(changed, r)
+			continue
+		}
+		if r.Status != ReleaseReady && r.Status != ReleaseWaiting {
+			continue
+		}
+		if rv, ok := release.Parse(r.Tag); ok && v.Newer(rv) {
+			r.Status, r.Note = ReleaseSuperseded, "skipped: "+d.Version+" was deployed instead"
+			changed = append(changed, r)
+		}
+	}
+	if !found && d.Trigger == TriggerCheck {
+		changed = append(changed, Release{Project: d.Project, Tag: d.Version, SHA: d.SHA, Status: ReleasePending})
+	}
+	return changed
+}
+
 // MaxErrorLength is the most of an error message that's stored.
 const MaxErrorLength = 2000
 
@@ -110,6 +173,7 @@ var (
 	ErrInvalidName         = errors.New("invalid project name")
 	ErrComposeProjectTaken = errors.New("compose project belongs to another project")
 	ErrNoDeployment        = errors.New("no such deployment")
+	ErrNoRelease           = errors.New("no such release")
 )
 
 // Store keeps the projects and their deployments. Names are matched without
@@ -146,7 +210,22 @@ type Store interface {
 	// HighestVersion if it's higher) and clears the last error and
 	// the failure count. A failure becomes the last error; a permanent one
 	// counts toward BrokenAfter (counting restarts with a new commit).
+	// A stable release deployed by a check becomes pending (its row is
+	// added if missing), one deployed by hand becomes known, and lower ones
+	// still waiting or ready become superseded; all in the same transaction.
 	RecordDeployment(ctx context.Context, d Deployment) error
+
+	// Releases returns a project's tracked version tags, or every project's
+	// for name "", oldest first.
+	Releases(ctx context.Context, name string) ([]Release, error)
+
+	// TrackReleases records tags that aren't tracked yet (tracked ones are
+	// left as they are) and marks the project's baseline as taken.
+	TrackReleases(ctx context.Context, name string, rs []Release) error
+
+	// SetReleaseStatus changes a tracked tag's status and note.
+	// ErrNoRelease if the project has no such tag.
+	SetReleaseStatus(ctx context.Context, name string, tag string, status string, note string) error
 
 	// ClearFailures resets the failure count and the broken state.
 	ClearFailures(ctx context.Context, name string) error

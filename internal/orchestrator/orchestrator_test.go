@@ -20,10 +20,12 @@ import (
 
 // fakeRepo is one repository on the fake GitHub.
 type fakeRepo struct {
-	head    string
-	tags    []github.Tag
-	compose string
-	down    bool
+	head      string
+	tags      []github.Tag
+	compose   string
+	down      bool
+	offBranch map[string]bool   // commits not on the default branch
+	files     map[string]string // other files at the top, the same at every commit
 }
 
 // fakeGitHub serves repositories by name, honouring ETags, and counts
@@ -119,6 +121,31 @@ func (g *fakeGitHub) ComposeFile(ctx context.Context, r github.Repo, sha string,
 		text = "services: {}\n"
 	}
 	return "compose.yaml", []byte(text), nil
+}
+
+func (g *fakeGitHub) File(ctx context.Context, r github.Repo, sha string, name string, token string) ([]byte, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	rp, err := g.repo(r, token)
+	if err != nil {
+		return nil, err
+	}
+	text, ok := rp.files[name]
+	if !ok {
+		return nil, nil
+	}
+	return []byte(text), nil
+}
+
+func (g *fakeGitHub) Contains(ctx context.Context, r github.Repo, head string, sha string, token string) (bool, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	rp, err := g.repo(r, token)
+	if err != nil {
+		return false, err
+	}
+	g.calls["compare"]++
+	return !rp.offBranch[sha], nil
 }
 
 // releases is a compose file that deploys release tags.
@@ -423,6 +450,110 @@ func TestReleaseMode(t *testing.T) {
 	}
 	if h, _ := store.History(ctx, "cove", 1); h[0].Version != "v1.2.0" {
 		t.Errorf("history: %+v", h[0])
+	}
+}
+
+// statuses is each tracked tag's status, "tag=status" in tag order.
+func statuses(t *testing.T, s projects.Store, name string) string {
+	t.Helper()
+	list, err := s.Releases(context.Background(), name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, r := range list {
+		out = append(out, r.Tag+"="+r.Status)
+	}
+	slices.Sort(out)
+	return strings.Join(out, " ")
+}
+
+func TestReleaseTracking(t *testing.T) {
+	gh := newGitHub(map[string]string{"cove": "h1"})
+	gh.repos["cove"].compose = releases("infra")
+	gh.repos["cove"].tags = []github.Tag{{Name: "v1.0.0", SHA: "s100"}, {Name: "v1.1.0", SHA: "s110"}, {Name: "v1.2.0-rc.1", SHA: "rc"}, {Name: "nightly", SHA: "h1"}}
+	gh.repos["cove"].offBranch = map[string]bool{}
+	o, store, d, _ := setup(t, gh, "cove")
+	ctx := context.Background()
+	now := time.Now()
+	// Before tracking: v1.1.0 already runs.
+	store.RecordDeployment(ctx, projects.Deployment{Project: "cove", SHA: "s110", Version: "v1.1.0", Trigger: projects.TriggerManual,
+		Status: projects.StatusSucceeded, StartedAt: now, FinishedAt: now})
+
+	o.Scan(ctx)
+	if got := statuses(t, store, "cove"); d.count() != 0 || got != "v1.0.0=known v1.1.0=known v1.2.0-rc.1=known" || gh.calls["compare"] != 0 {
+		t.Fatalf("baseline: %s; deployed %s, %d compares", got, d.list(), gh.calls["compare"])
+	}
+
+	// Tagged before main was pushed: it waits, and isn't checked again until main moves.
+	gh.repos["cove"].tags = append(gh.repos["cove"].tags, github.Tag{Name: "v1.2.0", SHA: "s120"})
+	gh.repos["cove"].offBranch["s120"] = true
+	o.Scan(ctx)
+	o.Scan(ctx)
+	if got := statuses(t, store, "cove"); d.count() != 0 || !strings.Contains(got, "v1.2.0=waiting") || gh.calls["compare"] != 1 {
+		t.Fatalf("not on main: %s; deployed %s, %d compares", got, d.list(), gh.calls["compare"])
+	}
+	if p := get(t, store, "cove"); p.LastError != "" {
+		t.Errorf("waiting isn't an error: %q", p.LastError)
+	}
+	gh.repos["cove"].head, gh.repos["cove"].offBranch["s120"] = "h2", false
+	o.Scan(ctx)
+	if got := statuses(t, store, "cove"); d.list() != "cove@v1.2.0" || !strings.Contains(got, "v1.2.0=pending") {
+		t.Fatalf("on main: %s; deployed %s", got, d.list())
+	}
+
+	// Two at once: the newest deploys, the other is skipped.
+	gh.repos["cove"].tags = append(gh.repos["cove"].tags, github.Tag{Name: "v1.3.0", SHA: "s130"}, github.Tag{Name: "v1.4.0", SHA: "s140"})
+	o.Scan(ctx)
+	if got := statuses(t, store, "cove"); d.list() != "cove@v1.2.0,cove@v1.4.0" || !strings.Contains(got, "v1.3.0=superseded v1.4.0=pending") {
+		t.Fatalf("two at once: %s; deployed %s", got, d.list())
+	}
+
+	// Lower than what's deployed, and a moved tag: neither deploys.
+	gh.repos["cove"].tags = append(gh.repos["cove"].tags, github.Tag{Name: "v1.3.5", SHA: "s135"})
+	gh.repos["cove"].tags[6].SHA = "elsewhere"
+	o.Scan(ctx)
+	list, _ := store.Releases(ctx, "cove")
+	for _, r := range list {
+		switch {
+		case r.Tag == "v1.3.5" && (r.Status != projects.ReleaseSuperseded || !strings.Contains(r.Note, "only move forward")),
+			r.Tag == "v1.4.0" && (r.Status != projects.ReleaseMoved || r.SHA != "s140" || !strings.Contains(r.Note, "elsewh")):
+			t.Errorf("%+v", r)
+		}
+	}
+	if d.count() != 2 {
+		t.Errorf("deployed %s", d.list())
+	}
+}
+
+func TestReleaseNotes(t *testing.T) {
+	gh := newGitHub(map[string]string{"cove": "h1"})
+	gh.repos["cove"].compose = releases("app")
+	gh.repos["cove"].tags = []github.Tag{{Name: "v1.0.0", SHA: "s100"}}
+	gh.repos["cove"].files = map[string]string{"CHANGELOG.md": "## v1.0.0\n\n### Added\n- Everything.\n"}
+	o, _, _, c := setup(t, gh, "cove")
+	ctx := context.Background()
+	o.Scan(ctx)
+
+	n, err := o.ReleaseNotes(ctx, "cove", "v1.0.0")
+	if err != nil || n.Body != "## v1.0.0 (2026-10-06)\n\n### Added\n- Everything.\n" || n.Release.Status != projects.ReleasePending ||
+		len(n.Warnings) != 1 || !strings.Contains(n.Warnings[0], "no date") {
+		t.Errorf("ReleaseNotes = %+v, %v (today is %s)", n, err, c.now().Format(time.DateOnly))
+	}
+	if _, err := o.ReleaseNotes(ctx, "cove", "v9.9.9"); !errors.Is(err, projects.ErrNoRelease) {
+		t.Errorf("an untracked tag = %v", err)
+	}
+}
+
+func TestSelfUpdateQueuesItsRelease(t *testing.T) {
+	o, store, d, _ := setup(t, newGitHub(map[string]string{"lighthouse": "h"}), "lighthouse")
+	ctx := context.Background()
+	now := time.Now()
+	d.handOffs = []deploy.HandOff{{Project: projects.Project{Name: "lighthouse"}, SHA: "s110", Version: "v1.1.0", Trigger: projects.TriggerCheck,
+		Done: true, Status: projects.StatusSucceeded, StartedAt: now, FinishedAt: now}}
+	o.RecordHandOffs(ctx)
+	if got := statuses(t, store, "lighthouse"); got != "v1.1.0=pending" {
+		t.Errorf("after the hand-off is recorded: %s", got)
 	}
 }
 

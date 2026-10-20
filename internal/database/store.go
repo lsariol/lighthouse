@@ -47,13 +47,13 @@ func constraintError(err error) error {
 
 const projectColumns = `name, repo_owner, repo_name, created_at, coalesce(compose_project, ''),
 	coalesce(deployed_sha, ''), coalesce(deployed_version, ''), coalesce(highest_version, ''), deployed_at, last_checked_at, check_count, coalesce(last_error, ''), last_error_at,
-	failure_count, coalesce(failing_sha, ''), broken, deploy_mode, tier, stopped, coalesce(held_sha, '')`
+	failure_count, coalesce(failing_sha, ''), broken, deploy_mode, tier, stopped, coalesce(held_sha, ''), releases_tracked_at IS NOT NULL`
 
 func scanProject(row pgx.Row) (projects.Project, error) {
 	var p projects.Project
 	err := row.Scan(&p.Name, &p.Repo.Owner, &p.Repo.Name, &p.CreatedAt, &p.ComposeProject,
 		&p.DeployedSHA, &p.DeployedVersion, &p.HighestVersion, &p.DeployedAt, &p.LastCheckedAt, &p.Checks, &p.LastError, &p.LastErrorAt,
-		&p.FailureCount, &p.FailingSHA, &p.Broken, &p.Mode, &p.Tier, &p.Stopped, &p.HeldSHA)
+		&p.FailureCount, &p.FailingSHA, &p.Broken, &p.Mode, &p.Tier, &p.Stopped, &p.HeldSHA, &p.ReleasesTracked)
 	return p, err
 }
 
@@ -194,6 +194,9 @@ func (d *Database) RecordDeployment(ctx context.Context, dep projects.Deployment
 				SET deployed_sha = $2, deployed_version = nullif($4, ''), highest_version = nullif($5, ''), deployed_at = $3,
 				    last_error = NULL, last_error_at = NULL, failure_count = 0, failing_sha = NULL, broken = false
 				WHERE id = $1`, id, dep.SHA, dep.FinishedAt, dep.Version, release.Higher(highest, dep.Version))
+			if err == nil {
+				err = recordDeployedReleases(ctx, tx, id, depID, dep)
+			}
 		case dep.FailureKind == projects.FailurePermanent:
 			_, err = tx.Exec(ctx, `UPDATE lighthouse.projects
 				SET last_error = nullif($2, ''), last_error_at = $3,
@@ -210,6 +213,97 @@ func (d *Database) RecordDeployment(ctx context.Context, dep projects.Deployment
 		}
 		return nil
 	})
+}
+
+// recordDeployedReleases applies projects.DeployedReleases in a
+// RecordDeployment transaction.
+func recordDeployedReleases(ctx context.Context, tx pgx.Tx, projectID int64, depID int64, dep projects.Deployment) error {
+	if _, ok := release.Parse(dep.Version); !ok {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `SELECT `+releaseColumns+` FROM lighthouse.releases r JOIN lighthouse.projects p ON p.id = r.project_id
+		WHERE r.project_id = $1 ORDER BY r.id FOR UPDATE OF r`, projectID)
+	if err != nil {
+		return fmt.Errorf("database: record deployment: read releases: %w", err)
+	}
+	list, err := pgx.CollectRows(rows, scanRelease)
+	if err != nil {
+		return fmt.Errorf("database: record deployment: read releases: %w", err)
+	}
+	for _, r := range projects.DeployedReleases(list, dep) {
+		if _, err := tx.Exec(ctx, `INSERT INTO lighthouse.releases (project_id, tag, sha, status, note, deployment_id)
+			VALUES ($1, $2, $3, $4, nullif($5, ''), CASE WHEN $4 = 'pending' THEN $6::bigint END)
+			ON CONFLICT (project_id, tag) DO UPDATE
+			SET status = excluded.status, note = excluded.note,
+			    deployment_id = coalesce(excluded.deployment_id, releases.deployment_id), updated_at = now()`,
+			projectID, r.Tag, r.SHA, r.Status, r.Note, depID); err != nil {
+			return fmt.Errorf("database: record deployment: release %s: %w", r.Tag, err)
+		}
+	}
+	return nil
+}
+
+const releaseColumns = `p.name, r.tag, r.sha, r.status, coalesce(r.note, ''), r.created_at, r.updated_at`
+
+func scanRelease(row pgx.CollectableRow) (projects.Release, error) {
+	var r projects.Release
+	err := row.Scan(&r.Project, &r.Tag, &r.SHA, &r.Status, &r.Note, &r.CreatedAt, &r.UpdatedAt)
+	return r, err
+}
+
+func (d *Database) Releases(ctx context.Context, name string) ([]projects.Release, error) {
+	if name != "" {
+		if _, err := d.Get(ctx, name); err != nil {
+			return nil, err
+		}
+	}
+	rows, err := d.pool.Query(ctx, `SELECT `+releaseColumns+` FROM lighthouse.releases r JOIN lighthouse.projects p ON p.id = r.project_id
+		WHERE $1 = '' OR lower(p.name) = lower($1) ORDER BY r.id`, name)
+	if err != nil {
+		return nil, fmt.Errorf("database: releases of %q: %w", name, err)
+	}
+	list, err := pgx.CollectRows(rows, scanRelease)
+	if err != nil {
+		return nil, fmt.Errorf("database: releases of %q: %w", name, err)
+	}
+	return list, nil
+}
+
+func (d *Database) TrackReleases(ctx context.Context, name string, rs []projects.Release) error {
+	return pgx.BeginFunc(ctx, d.pool, func(tx pgx.Tx) error {
+		var id int64
+		err := tx.QueryRow(ctx, `UPDATE lighthouse.projects SET releases_tracked_at = coalesce(releases_tracked_at, now())
+			WHERE lower(name) = lower($1) RETURNING id`, name).Scan(&id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return projects.ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("database: track releases of %q: %w", name, err)
+		}
+		for _, r := range rs {
+			if _, err := tx.Exec(ctx, `INSERT INTO lighthouse.releases (project_id, tag, sha, status, note)
+				VALUES ($1, $2, $3, $4, nullif($5, '')) ON CONFLICT (project_id, tag) DO NOTHING`,
+				id, r.Tag, r.SHA, r.Status, r.Note); err != nil {
+				return fmt.Errorf("database: track release %s of %q: %w", r.Tag, name, err)
+			}
+		}
+		return nil
+	})
+}
+
+func (d *Database) SetReleaseStatus(ctx context.Context, name string, tag string, status string, note string) error {
+	if _, err := d.Get(ctx, name); err != nil {
+		return err
+	}
+	tagged, err := d.pool.Exec(ctx, `UPDATE lighthouse.releases r SET status = $3, note = nullif($4, ''), updated_at = now()
+		FROM lighthouse.projects p WHERE p.id = r.project_id AND lower(p.name) = lower($1) AND r.tag = $2`, name, tag, status, note)
+	if err != nil {
+		return fmt.Errorf("database: set the status of %s of %q: %w", tag, name, err)
+	}
+	if tagged.RowsAffected() == 0 {
+		return projects.ErrNoRelease
+	}
+	return nil
 }
 
 func (d *Database) ClearFailures(ctx context.Context, name string) error {

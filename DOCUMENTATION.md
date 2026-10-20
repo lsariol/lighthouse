@@ -124,24 +124,27 @@ internal/
                            "<project>[:<service>]"; turns errors into messages that say how
                            to fix them; the startup phase
   orchestrator/            When projects deploy: checks (ETags, release tags, settings),
-                           the turn (one deploy at a time, by tier), waits after failures,
-                           Deploy, Rollback, Retry, Check, the reconcile loop, self-update
-                           results; records every check and deploy in the store
+                           tracking version tags (§4.7), the turn (one deploy at a time, by
+                           tier), waits after failures, Deploy, Rollback, Retry, Check, the
+                           reconcile loop, self-update results; records every check and
+                           deploy in the store
   deploy/                  How a project deploys: deploy.go (the steps, backup, rollback),
                            source.go (unpacking), verify.go (health, cleanup), scrub.go
                            (hiding secrets), selfupdate.go (the hand-off and the helper)
   policy/                  The deploy rules (§7.1)
   settings/                The x-lighthouse block (§7.2)
-  release/                 Which tags are releases, and which is newest
+  release/                 Version tags (SemVer, pre-releases too), and which release is newest
+  changelog/               A version's CHANGELOG.md section, as GitHub Release text
   compose/                 Runs docker compose (config, variables, build, up, down) and a
                            few docker commands, with deadlines and a clean environment
   docker/                  Containers by compose label, their state, output and names on a
                            network; image tags (Docker SDK)
-  projects/                Project, Deployment, Step, the Store interface, name rules
+  projects/                Project, Deployment, Step, Release, the Store interface, name rules
     projectstest/          An in-memory Store, and the tests every Store must pass
   database/                Postgres: the pool, goose migrations (migrations/, built in), the
                            schema check, and the Store
-  github/                  Repository URLs, commits, tags, a compose file, a commit's tarball
+  github/                  Repository URLs, commits, tags, a file at a commit (the compose
+                           file, CHANGELOG.md), whether a commit is on a branch, a tarball
   cove/                    Connecting to Cove at startup; Lighthouse's own secrets
 scripts/
   db/                      Admin SQL for sparkdb, run by hand (§10.1); test-db.sh uses it too
@@ -215,9 +218,11 @@ branch mode (the default):
   sha == the deployed commit → nothing to do
   otherwise                  → deploy sha
 release mode (deploy: releases):
-  GET /repos/<owner>/<repo>/tags (If-None-Match) → the newest plain version tag, v1.2.3 or 1.2.3
-  newer than every release deployed before → deploy it; otherwise nothing
-  (a deployed release whose tag moved to another commit isn't redeployed; a warning is logged)
+  GET /repos/<owner>/<repo>/tags (If-None-Match) → the version tags, v1.2.3 (or 1.2.3), v1.2.3-rc.1
+  record what's new among them (§4.7): a new stable tag on the default branch is ready,
+    one not on it yet waits (GET …/compare/<tag commit>...<branch head>, once per tag and branch move)
+  the newest ready release newer than every release deployed before → deploy it; otherwise nothing
+  (pre-releases, tags not newer than what's deployed, and tags that moved are never deployed)
 
 project broken and it's the failing commit → not tried again (no error for the scan)
 record the check (time, count, and the error or none)
@@ -296,6 +301,24 @@ Lighthouse deploys itself like any project (its compose file says `x-lighthouse:
 
 `scripts/e2e-self-update.sh` runs all of this against the local Docker: a real hand-off, swap, and a rollback of a version that never becomes healthy.
 
+### 4.7 Releases
+
+For a project that deploys releases, Lighthouse records every version tag and what it made of it (table `releases`, [§6](#6-data-the-database)), so that a GitHub Release can be published for each version once it has deployed and passed its checks. **v1.1.0 only tracks them: nothing is published yet.** `releases <name>` lists them; `releases <name> <tag>` shows the Release text that will be published.
+
+| Status | Meaning | What happens |
+|---|---|---|
+| `known` | There before Lighthouse tracked the project's tags (its **baseline**, taken at the first check), a pre-release (`v1.2.0-rc.1`), or deployed by hand | Never deployed or published automatically |
+| `waiting` | Its commit isn't on the default branch yet: the tag was pushed before `main` | Checked again whenever the branch moves; `status` mentions it after 10 minutes |
+| `ready` | On the default branch and newer than any release deployed before | The next check deploys the newest one |
+| `pending` | Deployed by a check (or by Lighthouse's own update, recorded after the hand-off) and verified | Its GitHub Release is due |
+| `published`, `failed` | The Release exists; publishing it failed | (from v1.2.0) |
+| `superseded` | Never deployed: a newer release deployed first, or it isn't newer than one already deployed (versions only move forward) | Never deployed or published automatically |
+| `moved` | The tag now points at another commit than when it was first seen | Never deployed or published; `status` mentions it |
+
+- **Pending is set in the same transaction that records the deploy**, so a restart can't lose it. Deploys by hand (`deploy`, `rollback`), retries of the running version and the reconcile loop never make a release pending.
+- **The Release text** is the version's section of `CHANGELOG.md` at the tag's commit, under the heading `## vX.Y.Z (YYYY-MM-DD)`: the date written in the CHANGELOG, or the publication date with a warning when the heading has none. Without a section the text is "No notes for this version." Headings may be written `## v1.2.3 (2026-10-20)`, `## v1.2.3` or `## [1.2.3] — 2026-10-20`.
+- `list` shows a project's waiting and moved tags, and a project that deploys releases but has no version tag yet; `status` lists them under "Needs attention".
+
 ---
 
 ## 5. Configuration
@@ -369,7 +392,9 @@ Lighthouse's state is in `lighthouse_db` on sparkdb, schema `lighthouse`. Roles,
 
 `projects.held_sha` (migration `00005`): the branch's newest commit when someone went back to an older one; checks don't deploy it again.
 
-**Who may do what** (migrations `00002`–`00004`): `lighthouse_app` reads and changes `projects`, but can only **add** to `deployments` and `deployment_steps`, never change or delete history, and only reads `goose_db_version`; it can't create anything. `lighthouse_reader` reads everything (pgAdmin). Everything is owned by `lighthouse_owner`.
+**`releases`** (migration `00006`): one row per version tag of a project that deploys releases ([§4.7](#47-releases)): `tag`, `sha` (the commit when first seen), `status`, `note` (why, in a sentence), `deployment_id` (the deploy that made it pending), `created_at`, `updated_at`. Unique per project and tag; the rows go when the project is removed. `projects.releases_tracked_at` is when its baseline was taken.
+
+**Who may do what** (migrations `00002`–`00006`): `lighthouse_app` reads and changes `projects` and reads, adds and updates `releases`, but can only **add** to `deployments` and `deployment_steps`, never change or delete history, and only reads `goose_db_version`; it can't create anything. `lighthouse_reader` reads everything (pgAdmin). Everything is owned by `lighthouse_owner`.
 
 
 ---
@@ -550,7 +575,8 @@ Lighthouse's CLI follows the server's CLI conventions (clig.dev; modelled on Cov
 
 | Command | Usage | Notes |
 |---|---|---|
-| `list`, `ls`, `l` | `list` | Every project, newest deploy first (never deployed last): repository, what it deploys (commits or releases, and its tier), what runs (version and commit, or stopped), last deploy, last check; its last error, and whether it's broken |
+| `list`, `ls`, `l` | `list` | Every project, newest deploy first (never deployed last): repository, what it deploys (commits or releases, and its tier), what runs (version and commit, or stopped), last deploy, last check; its last error, whether it's broken, tags waiting for `main` or moved, and no release yet |
+| `releases` | `releases <name> [tag]` | A project's version tags, newest first: commit, status ([§4.7](#47-releases)), since when, and why. With a tag: the GitHub Release text it will get, and a warning when its CHANGELOG section or date is missing |
 | `add` | `add <url> [--name <name>]` | Named after the repository (lowercase). `--name` only when that name is taken; on a terminal `add` asks instead. Names: letters, digits, `-`, `_`, up to 64. The URL may have `www.`, a trailing `/` or `.git`. Deployed on the next check |
 | `remove`, `rm` | `remove <name> [--keep] [--yes]` | Asks first. Stops watching it and removes its containers and networks (`docker compose down`); its data and images stay. `--keep` leaves the containers running, untracked |
 | `rename` | `rename <name> <new-name>` | Lighthouse's name only; repository and containers unchanged |
@@ -567,7 +593,7 @@ Lighthouse's CLI follows the server's CLI conventions (clig.dev; modelled on Cov
 | `stop` | `stop <name[:service]\|all> [--yes]` | Asks first. A whole project stopped stays down on purpose: not deployed or brought back until `start`, `restart` or `deploy` |
 | `restart` | `restart <name[:service]\|all> [--yes]` | `all` asks first |
 | `logs` | `logs <name[:service]> [lines]` | The last lines (50, up to 10,000) of each container, on stdout; with a heading per service when there are several |
-| `status` | `status` | Version, environment, startup state, automatic deploys, Cove, GitHub token, database and schema; then each project (running, degraded, stopped or missing; its commit, last deploy and check, or `broken`) with a line per service (state and health). Exits 1 and lists what needs attention when something does |
+| `status` | `status` | Version, environment, startup state, automatic deploys, Cove, GitHub token, database and schema; then each project (running, degraded, stopped or missing; its commit, last deploy and check, or `broken`) with a line per service (state and health). Exits 1 and lists what needs attention when something does, including a tag waiting for `main` over 10 minutes, a moved tag, and a project with no release yet |
 | `help`, `h` | `help [command\|setup\|failed\|rules]` | |
 | `exit`, `quit` | | Leave the shell |
 

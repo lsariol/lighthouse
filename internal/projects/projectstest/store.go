@@ -18,6 +18,7 @@ type Store struct {
 	mu          sync.Mutex
 	projects    []projects.Project
 	deployments []projects.Deployment
+	releases    []projects.Release
 }
 
 var _ projects.Store = (*Store)(nil)
@@ -91,6 +92,14 @@ func (s *Store) Remove(ctx context.Context, name string) error {
 		}
 	}
 	s.deployments = kept
+
+	keptReleases := s.releases[:0]
+	for _, r := range s.releases {
+		if r.Project != removed {
+			keptReleases = append(keptReleases, r)
+		}
+	}
+	s.releases = keptReleases
 	return nil
 }
 
@@ -112,6 +121,11 @@ func (s *Store) Rename(ctx context.Context, name string, newName string) error {
 	for k := range s.deployments {
 		if s.deployments[k].Project == old {
 			s.deployments[k].Project = newName
+		}
+	}
+	for k := range s.releases {
+		if s.releases[k].Project == old {
+			s.releases[k].Project = newName
 		}
 	}
 	return nil
@@ -223,6 +237,9 @@ func (s *Store) RecordDeployment(ctx context.Context, d projects.Deployment) err
 		p.HighestVersion = release.Higher(p.HighestVersion, d.Version)
 		p.LastError, p.LastErrorAt = "", nil
 		p.FailureCount, p.FailingSHA, p.Broken = 0, "", false
+		for _, r := range projects.DeployedReleases(s.releasesOf(p.Name), d) {
+			s.putRelease(r, false)
+		}
 		return nil
 	}
 
@@ -248,6 +265,77 @@ func (s *Store) ClearFailures(ctx context.Context, name string) error {
 	p := &s.projects[i]
 	p.FailureCount, p.FailingSHA, p.Broken = 0, "", false
 	return nil
+}
+
+// releasesOf returns the project's tracked tags, oldest first.
+func (s *Store) releasesOf(project string) []projects.Release {
+	var list []projects.Release
+	for _, r := range s.releases {
+		if project == "" || r.Project == project {
+			list = append(list, r)
+		}
+	}
+	return list
+}
+
+// putRelease adds r, or replaces the row for its tag unless keep.
+func (s *Store) putRelease(r projects.Release, keep bool) {
+	now := time.Now()
+	for k, old := range s.releases {
+		if old.Project == r.Project && old.Tag == r.Tag {
+			if !keep {
+				r.CreatedAt, r.UpdatedAt = old.CreatedAt, now
+				s.releases[k] = r
+			}
+			return
+		}
+	}
+	r.CreatedAt, r.UpdatedAt = now, now
+	s.releases = append(s.releases, r)
+}
+
+func (s *Store) Releases(ctx context.Context, name string) ([]projects.Release, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if name == "" {
+		return s.releasesOf(""), nil
+	}
+	i := s.index(name)
+	if i < 0 {
+		return nil, projects.ErrNotFound
+	}
+	return s.releasesOf(s.projects[i].Name), nil
+}
+
+func (s *Store) TrackReleases(ctx context.Context, name string, rs []projects.Release) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	i := s.index(name)
+	if i < 0 {
+		return projects.ErrNotFound
+	}
+	for _, r := range rs {
+		r.Project = s.projects[i].Name
+		s.putRelease(r, true)
+	}
+	s.projects[i].ReleasesTracked = true
+	return nil
+}
+
+func (s *Store) SetReleaseStatus(ctx context.Context, name string, tag string, status string, note string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	i := s.index(name)
+	if i < 0 {
+		return projects.ErrNotFound
+	}
+	for k, r := range s.releases {
+		if r.Project == s.projects[i].Name && r.Tag == tag {
+			s.releases[k].Status, s.releases[k].Note, s.releases[k].UpdatedAt = status, note, time.Now()
+			return nil
+		}
+	}
+	return projects.ErrNoRelease
 }
 
 // newest returns the project's deployments, newest first.

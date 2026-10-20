@@ -185,6 +185,18 @@ func (c *Client) History(ctx context.Context, name string, limit int) ([]Deploym
 	return history, err
 }
 
+func (c *Client) Releases(ctx context.Context, name string) ([]Release, error) {
+	var releases []Release
+	err := c.call(ctx, http.MethodGet, project(name)+"/releases", nil, &releases)
+	return releases, err
+}
+
+func (c *Client) ReleaseNotes(ctx context.Context, name string, tag string) (ReleaseNotes, error) {
+	var notes ReleaseNotes
+	err := c.call(ctx, http.MethodGet, project(name)+"/releases/"+url.PathEscape(tag), nil, &notes)
+	return notes, err
+}
+
 func (c *Client) Scan(ctx context.Context) error {
 	return c.call(ctx, http.MethodPost, "/v1/scan", nil, nil)
 }

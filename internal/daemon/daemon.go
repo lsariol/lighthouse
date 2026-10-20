@@ -19,6 +19,8 @@ import (
 	"github.com/lsariol/lighthouse/internal/github"
 	"github.com/lsariol/lighthouse/internal/orchestrator"
 	"github.com/lsariol/lighthouse/internal/projects"
+	"github.com/lsariol/lighthouse/internal/release"
+	"github.com/lsariol/lighthouse/internal/settings"
 )
 
 // Containers finds and controls a compose project's containers.
@@ -185,11 +187,70 @@ func (d *Daemon) Projects(ctx context.Context) ([]control.Project, error) {
 	if err != nil {
 		return nil, err
 	}
+	all, err := store.Releases(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	byProject := map[string][]projects.Release{}
+	for _, r := range all {
+		byProject[strings.ToLower(r.Project)] = append(byProject[strings.ToLower(r.Project)], r)
+	}
 	out := make([]control.Project, 0, len(list))
 	for _, p := range list {
-		out = append(out, toProject(p))
+		cp := toProject(p)
+		stable := false
+		for _, r := range byProject[strings.ToLower(p.Name)] {
+			if r.Status == projects.ReleaseWaiting || r.Status == projects.ReleaseMoved {
+				cp.OpenReleases = append(cp.OpenReleases, toRelease(r))
+			}
+			if _, ok := release.Parse(r.Tag); ok {
+				stable = true
+			}
+		}
+		cp.NoRelease = p.Mode == settings.DeployReleases && p.ReleasesTracked && !stable
+		out = append(out, cp)
 	}
 	return out, nil
+}
+
+func toRelease(r projects.Release) control.Release {
+	return control.Release{Tag: r.Tag, Commit: r.SHA, Status: r.Status, Note: r.Note, Since: r.UpdatedAt}
+}
+
+func (d *Daemon) Releases(ctx context.Context, name string) ([]control.Release, error) {
+	store, _, err := d.parts()
+	if err != nil {
+		return nil, err
+	}
+	list, err := store.Releases(ctx, name)
+	if err != nil {
+		return nil, projectError(err, name, "")
+	}
+	sort.SliceStable(list, func(i, j int) bool {
+		a, _ := release.ParseTag(list[i].Tag)
+		b, _ := release.ParseTag(list[j].Tag)
+		return a.Newer(b)
+	})
+	out := make([]control.Release, 0, len(list))
+	for _, r := range list {
+		out = append(out, toRelease(r))
+	}
+	return out, nil
+}
+
+func (d *Daemon) ReleaseNotes(ctx context.Context, name string, tag string) (control.ReleaseNotes, error) {
+	_, o, err := d.parts()
+	if err != nil {
+		return control.ReleaseNotes{}, err
+	}
+	n, err := o.ReleaseNotes(ctx, name, tag)
+	if errors.Is(err, projects.ErrNoRelease) {
+		return control.ReleaseNotes{}, control.Errorf(control.KindNotFound, "%s has no tracked tag %q. \"releases %s\" lists them.", name, tag, name)
+	}
+	if err != nil {
+		return control.ReleaseNotes{}, projectError(err, name, "")
+	}
+	return control.ReleaseNotes{Release: toRelease(n.Release), Body: n.Body, Warnings: n.Warnings}, nil
 }
 
 func toProject(p projects.Project) control.Project {

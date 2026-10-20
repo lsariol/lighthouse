@@ -88,6 +88,15 @@ func (f *fakeService) History(ctx context.Context, name string, limit int) ([]De
 	return []Deployment{{Commit: "abc", Trigger: "manual", Status: "failed", Error: "build failed"}}, nil
 }
 
+func (f *fakeService) Releases(ctx context.Context, name string) ([]Release, error) {
+	f.record("releases " + name)
+	return []Release{{Tag: "v1.0.0", Commit: "abc", Status: "pending"}}, nil
+}
+func (f *fakeService) ReleaseNotes(ctx context.Context, name string, tag string) (ReleaseNotes, error) {
+	f.record("release notes " + name + " " + tag)
+	return ReleaseNotes{Release: Release{Tag: tag}, Body: "## " + tag + " (2026-10-20)\n", Warnings: []string{"undated"}}, nil
+}
+
 // serve starts Serve on a socket in a temp folder and returns a Client for it.
 func serve(t *testing.T, svc Service) (*Client, string) {
 	t.Helper()
@@ -155,6 +164,15 @@ func TestRoundTrip(t *testing.T) {
 		t.Errorf("History = %+v, %v", history, err)
 	}
 
+	releases, err := c.Releases(ctx, "plop")
+	if err != nil || len(releases) != 1 || releases[0].Status != "pending" {
+		t.Errorf("Releases = %+v, %v", releases, err)
+	}
+	notes, err := c.ReleaseNotes(ctx, "plop", "v1.0.0-rc.1")
+	if err != nil || notes.Release.Tag != "v1.0.0-rc.1" || notes.Body != "## v1.0.0-rc.1 (2026-10-20)\n" || len(notes.Warnings) != 1 {
+		t.Errorf("ReleaseNotes = %+v, %v", notes, err)
+	}
+
 	for _, call := range []func() error{
 		func() error { return c.Rename(ctx, "plop", "plop2") },
 		func() error { return c.SetURL(ctx, "plop", "https://github.com/a/b") },
@@ -171,7 +189,7 @@ func TestRoundTrip(t *testing.T) {
 		}
 	}
 
-	want := []string{"add new https://github.com/a/new", "logs plop", "report plop 2", "check plop", "history plop 5", "rename plop plop2", "set-url plop https://github.com/a/b",
+	want := []string{"add new https://github.com/a/new", "logs plop", "report plop 2", "check plop", "history plop 5", "releases plop", "release notes plop v1.0.0-rc.1", "rename plop plop2", "set-url plop https://github.com/a/b",
 		"retry plop", "start plop:web", "stop plop", "restart plop", "scan", "pause", "resume"}
 	if len(svc.calls) != len(want) {
 		t.Fatalf("calls = %v, want %v", svc.calls, want)

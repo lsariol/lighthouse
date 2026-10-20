@@ -273,20 +273,54 @@ var ComposeFiles = []string{"compose.yaml", "compose.yml", "docker-compose.yaml"
 func (c Client) ComposeFile(ctx context.Context, repo Repo, sha string, token string) (string, []byte, error) {
 	op := fmt.Sprintf("read the compose file of %s at %.7s", repo, sha)
 	for _, name := range ComposeFiles {
-		resp, err := c.get(ctx, op, c.url(repo, "/contents/"+name+"?ref="+sha), token, "application/vnd.github.raw+json", "")
+		text, err := c.file(ctx, op, repo, sha, name, token)
 		var gh *Error
 		if errors.As(err, &gh) && gh.Status == http.StatusNotFound {
 			continue
 		}
-		if err != nil {
-			return "", nil, err
-		}
-		text, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		resp.Body.Close()
-		if err != nil {
-			return "", nil, &Error{Op: op, Err: err}
-		}
-		return name, text, nil
+		return name, text, err
 	}
 	return "", nil, &Error{Op: op, Status: http.StatusNotFound, Err: fmt.Errorf("there's no compose file at the top of the repository (%s)", strings.Join(ComposeFiles, ", "))}
+}
+
+// File returns a file at the top of the repository at a commit, or nil if
+// there's no such file.
+func (c Client) File(ctx context.Context, repo Repo, sha string, name string, token string) ([]byte, error) {
+	text, err := c.file(ctx, fmt.Sprintf("read %s of %s at %.7s", name, repo, sha), repo, sha, name, token)
+	var gh *Error
+	if errors.As(err, &gh) && gh.Status == http.StatusNotFound {
+		return nil, nil
+	}
+	return text, err
+}
+
+func (c Client) file(ctx context.Context, op string, repo Repo, sha string, name string, token string) ([]byte, error) {
+	resp, err := c.get(ctx, op, c.url(repo, "/contents/"+name+"?ref="+sha), token, "application/vnd.github.raw+json", "")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	text, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, &Error{Op: op, Err: err}
+	}
+	return text, nil
+}
+
+// Contains reports whether commit sha is in the history of head (a commit
+// or a branch), such as a tag's commit on the default branch.
+func (c Client) Contains(ctx context.Context, repo Repo, head string, sha string, token string) (bool, error) {
+	op := fmt.Sprintf("check whether %.7s is in the history of %.7s in %s", sha, head, repo)
+	resp, err := c.get(ctx, op, c.url(repo, "/compare/"+url.PathEscape(sha)+"..."+url.PathEscape(head)+"?per_page=1"), token, "application/vnd.github+json", "")
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	var compare struct {
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(&compare); err != nil || compare.Status == "" {
+		return false, &Error{Op: op, Status: resp.StatusCode, Err: fmt.Errorf("unexpected answer: %v", err)}
+	}
+	return compare.Status == "ahead" || compare.Status == "identical", nil
 }

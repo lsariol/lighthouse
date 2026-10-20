@@ -50,6 +50,11 @@ type Service interface {
 	History(ctx context.Context, name string, limit int) ([]Deployment, error)
 	// Report returns one deployment with its steps: 1 is the latest.
 	Report(ctx context.Context, name string, n int) (Deployment, error)
+
+	// Releases lists a project's tracked version tags, newest version first.
+	Releases(ctx context.Context, name string) ([]Release, error)
+	// ReleaseNotes shows what a tracked tag's GitHub Release would say.
+	ReleaseNotes(ctx context.Context, name string, tag string) (ReleaseNotes, error)
 }
 
 // Status is the daemon's health and every project's container state.
@@ -87,6 +92,24 @@ type Project struct {
 	LastErrorAt    *time.Time      `json:"lastErrorAt,omitempty"`
 	FailureCount   int             `json:"failureCount,omitempty"`
 	Broken         bool            `json:"broken,omitempty"`
+	OpenReleases   []Release       `json:"openReleases,omitempty"` // tags that are waiting or moved
+	NoRelease      bool            `json:"noRelease,omitempty"`    // deploys releases but has no version tag yet
+}
+
+// Release is a version tag Lighthouse tracks, and what it made of it.
+type Release struct {
+	Tag    string    `json:"tag"`
+	Commit string    `json:"commit"`
+	Status string    `json:"status"`
+	Note   string    `json:"note,omitempty"`
+	Since  time.Time `json:"since"`
+}
+
+// ReleaseNotes is what a tag's GitHub Release would say.
+type ReleaseNotes struct {
+	Release  Release  `json:"release"`
+	Body     string   `json:"body"`
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // ServiceStatus is one service of a project, as running now.

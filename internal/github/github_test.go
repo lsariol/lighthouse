@@ -65,6 +65,15 @@ func fakeGitHub(t *testing.T) Client {
 			w.Write([]byte(`{"not":"a list"}`))
 		case "/repos/o/good/tarball/abc123":
 			w.Write([]byte("tarball bytes"))
+		case "/repos/o/good/contents/CHANGELOG.md":
+			if r.URL.Query().Get("ref") != "abc123" || r.Header.Get("Accept") != "application/vnd.github.raw+json" {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			w.Write([]byte("## v1.0.0 (2026-10-20)\n"))
+		case "/repos/o/good/compare/s100...abc123", "/repos/o/good/compare/abc123...abc123", "/repos/o/good/compare/s200...abc123":
+			status := map[string]string{"s100": "ahead", "abc123": "identical", "s200": "diverged"}[strings.Split(strings.TrimPrefix(r.URL.Path, "/repos/o/good/compare/"), "...")[0]]
+			w.Write([]byte(`{"status":"` + status + `","commits":[],"files":[]}`))
 		case "/repos/o/down/commits":
 			w.WriteHeader(http.StatusBadGateway)
 		case "/repos/o/limited/commits":
@@ -82,6 +91,31 @@ func fakeGitHub(t *testing.T) Client {
 func temporary(err error) bool {
 	var e *Error
 	return errors.As(err, &e) && e.Temporary()
+}
+
+func TestFileAndContains(t *testing.T) {
+	c := fakeGitHub(t)
+	ctx := context.Background()
+	repo := Repo{Owner: "o", Name: "good"}
+
+	if text, err := c.File(ctx, repo, "abc123", "CHANGELOG.md", "t"); err != nil || string(text) != "## v1.0.0 (2026-10-20)\n" {
+		t.Errorf("File = %q, %v", text, err)
+	}
+	if text, err := c.File(ctx, repo, "abc123", "NOPE.md", "t"); err != nil || text != nil {
+		t.Errorf("a missing file = %q, %v; want nil, nil", text, err)
+	}
+	if _, err := c.File(ctx, repo, "abc123", "CHANGELOG.md", "wrong"); err == nil {
+		t.Error("a rejected token isn't an error")
+	}
+
+	for sha, want := range map[string]bool{"s100": true, "abc123": true, "s200": false} {
+		if got, err := c.Contains(ctx, repo, "abc123", sha, "t"); err != nil || got != want {
+			t.Errorf("Contains(%s) = %v, %v; want %v", sha, got, err, want)
+		}
+	}
+	if _, err := c.Contains(ctx, repo, "abc123", "unknown", "t"); err == nil {
+		t.Error("an unknown commit isn't an error")
+	}
 }
 
 func TestLatestCommit(t *testing.T) {

@@ -110,6 +110,15 @@ func Handler(svc Service) http.Handler {
 		respond(w, history, err)
 	})
 
+	mux.HandleFunc("GET /v1/projects/{name}/releases", func(w http.ResponseWriter, r *http.Request) {
+		releases, err := svc.Releases(r.Context(), r.PathValue("name"))
+		respond(w, releases, err)
+	})
+	mux.HandleFunc("GET /v1/projects/{name}/releases/{tag}", func(w http.ResponseWriter, r *http.Request) {
+		notes, err := svc.ReleaseNotes(r.Context(), r.PathValue("name"), r.PathValue("tag"))
+		respond(w, notes, err)
+	})
+
 	global := map[string]func(context.Context) error{
 		"scan":   svc.Scan,
 		"pause":  svc.Pause,

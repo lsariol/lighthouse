@@ -2,6 +2,19 @@
 
 All notable changes to Lighthouse. Versions follow [semantic versioning](https://semver.org).
 
+## v1.1.0 (unreleased)
+
+Lighthouse starts tracking each project's version tags, the first step toward publishing GitHub Releases. Nothing is published yet.
+
+### Added
+- **Release tracking** for projects that deploy releases (DOCUMENTATION.md §4.7). Each version tag gets a status: `known`, `waiting`, `ready`, `pending`, `superseded` or `moved`. The tags already there at the first check are recorded as `known` and never published automatically.
+- **`releases <name> [tag]`** lists a project's tags and their status, or shows the GitHub Release text a tag will get: its `CHANGELOG.md` section under a dated heading, with a warning when the section or the date is missing.
+- `list` and `status` show tags waiting for `main`, moved tags, and projects that deploy releases but have no version tag yet.
+
+### Changed
+- **A release deploys only once its commit is on the default branch.** A tag pushed before `main` waits, and deploys on the first check after `main` contains it.
+- Version tags are compared as SemVer, pre-releases included; pre-releases are still never deployed automatically.
+
 ## v1.0.4 (unreleased)
 
 ### Changed

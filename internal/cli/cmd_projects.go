@@ -42,6 +42,9 @@ func (c *CLI) list(ctx context.Context, args []string) error {
 		if p.LastError != "" {
 			warn(fmt.Sprintf("%q, last check %s: %s", p.Name, formatTime(p.LastErrorAt), p.LastError))
 		}
+		for _, line := range releaseWarnings(p) {
+			warn(line)
+		}
 	}
 	return nil
 }

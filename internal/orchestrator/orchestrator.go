@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/lsariol/lighthouse/internal/changelog"
 	"github.com/lsariol/lighthouse/internal/deploy"
 	"github.com/lsariol/lighthouse/internal/docker"
 	"github.com/lsariol/lighthouse/internal/github"
@@ -44,7 +46,9 @@ type GitHub interface {
 	CheckCommit(ctx context.Context, repo github.Repo, token string, etag string) (string, string, error)
 	Tags(ctx context.Context, repo github.Repo, token string, etag string) ([]github.Tag, string, error)
 	ComposeFile(ctx context.Context, repo github.Repo, sha string, token string) (string, []byte, error)
+	File(ctx context.Context, repo github.Repo, sha string, name string, token string) ([]byte, error)
 	ResolveCommit(ctx context.Context, repo github.Repo, ref string, token string) (string, error)
+	Contains(ctx context.Context, repo github.Repo, head string, sha string, token string) (bool, error)
 }
 
 // Containers tells the reconcile loop what's running. *docker.Client
@@ -91,7 +95,7 @@ type watch struct {
 	settingsSHA string
 	tagsETag    string
 	tags        []github.Tag
-	movedWarned string
+	waitedHead  string
 
 	backoff     time.Duration
 	nextAttempt time.Time
@@ -272,20 +276,146 @@ func (o *Orchestrator) latest(ctx context.Context, p *projects.Project, w *watch
 	default:
 		w.tags, w.tagsETag = tags, etag
 	}
-	newest, v, found := release.Newest(tags)
+	rows, err := o.trackTags(ctx, p, w, tags)
+	if err != nil {
+		return target{}, false, err
+	}
+	next, found := nextRelease(rows, *p)
 	if !found {
 		return target{}, false, nil
 	}
-	// Only a release newer than any deployed before, so going back by hand sticks.
-	if highest, ok := release.Parse(release.Higher(p.HighestVersion, p.DeployedVersion)); ok && !v.Newer(highest) {
-		if newest.Name == p.DeployedVersion && newest.SHA != p.DeployedSHA && w.movedWarned != newest.Name {
-			w.movedWarned = newest.Name
-			slog.Warn("a deployed release's tag moved to another commit; it isn't deployed again (deploy it by hand if that's wanted)",
-				"project", p.Name, "version", newest.Name, "deployed", short(p.DeployedSHA), "tag", short(newest.SHA))
-		}
-		return target{}, false, nil
+	return target{sha: next.SHA, version: next.Tag}, true, nil
+}
+
+// trackTags records what's new among p's version tags: the baseline the
+// first time, then each new tag, tags that moved, and waiting tags that
+// reached the default branch. It returns p's tracked tags.
+func (o *Orchestrator) trackTags(ctx context.Context, p *projects.Project, w *watch, tags []github.Tag) ([]projects.Release, error) {
+	rows, err := o.store.Releases(ctx, p.Name)
+	if err != nil {
+		return nil, err
 	}
-	return target{sha: newest.SHA, version: newest.Name}, true, nil
+	byTag := map[string]int{}
+	for i, r := range rows {
+		byTag[r.Tag] = i
+	}
+	highest, deployedOne := release.Parse(release.Higher(p.HighestVersion, p.DeployedVersion))
+
+	var added []projects.Release
+	for _, t := range tags {
+		v, ok := release.ParseTag(t.Name)
+		if !ok {
+			continue
+		}
+		i, tracked := byTag[t.Name]
+		switch {
+		case !tracked:
+			r := projects.Release{Project: p.Name, Tag: t.Name, SHA: t.SHA}
+			switch {
+			case v.Prerelease():
+				r.Status, r.Note = projects.ReleaseKnown, "a pre-release: not deployed or published automatically"
+			case deployedOne && !v.Newer(highest) && !p.ReleasesTracked:
+				r.Status, r.Note = projects.ReleaseKnown, "there before Lighthouse tracked releases"
+			case deployedOne && !v.Newer(highest):
+				r.Status, r.Note = projects.ReleaseSuperseded, "not newer than "+highest.Tag+", already deployed: versions only move forward"
+			default:
+				on, err := o.github.Contains(ctx, p.Repo, w.head, t.SHA, o.gitToken)
+				if err != nil {
+					return nil, err
+				}
+				r.Status = projects.ReleaseReady
+				if !on {
+					r.Status, r.Note = projects.ReleaseWaiting, notOnBranch
+				}
+			}
+			added = append(added, r)
+		case rows[i].SHA != t.SHA && rows[i].Status != projects.ReleaseMoved:
+			note := fmt.Sprintf("the tag moved from %s to %s, so it isn't deployed or published", short(rows[i].SHA), short(t.SHA))
+			if err := o.store.SetReleaseStatus(ctx, p.Name, t.Name, projects.ReleaseMoved, note); err != nil {
+				return nil, err
+			}
+			slog.Warn("a release's tag moved to another commit; it isn't deployed or published", "project", p.Name, "tag", t.Name,
+				"was", short(rows[i].SHA), "now", short(t.SHA))
+			rows[i].Status, rows[i].Note = projects.ReleaseMoved, note
+		case rows[i].Status == projects.ReleaseWaiting && w.waitedHead != w.head:
+			on, err := o.github.Contains(ctx, p.Repo, w.head, t.SHA, o.gitToken)
+			if err != nil {
+				return nil, err
+			}
+			if on {
+				if err := o.store.SetReleaseStatus(ctx, p.Name, t.Name, projects.ReleaseReady, ""); err != nil {
+					return nil, err
+				}
+				slog.Info("a release reached the default branch", "project", p.Name, "tag", t.Name)
+				rows[i].Status, rows[i].Note = projects.ReleaseReady, ""
+			}
+		}
+	}
+	w.waitedHead = w.head
+
+	if len(added) > 0 || !p.ReleasesTracked {
+		if err := o.store.TrackReleases(ctx, p.Name, added); err != nil {
+			return nil, err
+		}
+		for _, r := range added {
+			slog.Info("new release tag", "project", p.Name, "tag", r.Tag, "status", r.Status, "note", r.Note)
+		}
+		p.ReleasesTracked = true
+		rows = append(rows, added...)
+	}
+	return rows, nil
+}
+
+// Notes is what a tracked tag's GitHub Release would say.
+type Notes struct {
+	Release  projects.Release
+	Body     string
+	Warnings []string
+}
+
+// ReleaseNotes builds a tracked tag's Release text from the CHANGELOG at its
+// commit, dated today where the CHANGELOG gives no date.
+func (o *Orchestrator) ReleaseNotes(ctx context.Context, name string, tag string) (Notes, error) {
+	p, err := o.store.Get(ctx, name)
+	if err != nil {
+		return Notes{}, err
+	}
+	rows, err := o.store.Releases(ctx, p.Name)
+	if err != nil {
+		return Notes{}, err
+	}
+	i := slices.IndexFunc(rows, func(r projects.Release) bool { return r.Tag == tag })
+	if i < 0 {
+		return Notes{}, projects.ErrNoRelease
+	}
+	text, err := o.github.File(ctx, p.Repo, rows[i].SHA, changelog.File, o.gitToken)
+	if err != nil {
+		return Notes{}, err
+	}
+	body, warnings := changelog.Notes(text, tag, o.now())
+	return Notes{Release: rows[i], Body: body, Warnings: warnings}, nil
+}
+
+// notOnBranch is a waiting release's note.
+const notOnBranch = "its commit isn't on the default branch yet (push main first); it deploys once it is"
+
+// nextRelease is the newest ready release newer than any deployed before, so
+// going back by hand sticks.
+func nextRelease(rows []projects.Release, p projects.Project) (projects.Release, bool) {
+	highest, deployedOne := release.Parse(release.Higher(p.HighestVersion, p.DeployedVersion))
+	var best projects.Release
+	var bestV release.Version
+	found := false
+	for _, r := range rows {
+		v, ok := release.Parse(r.Tag)
+		if r.Status != projects.ReleaseReady || !ok || deployedOne && !v.Newer(highest) {
+			continue
+		}
+		if !found || v.Newer(bestV) {
+			best, bestV, found = r, v, true
+		}
+	}
+	return best, found
 }
 
 // readSettings reads the x-lighthouse settings from the compose file at sha

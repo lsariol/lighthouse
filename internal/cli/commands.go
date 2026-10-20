@@ -210,6 +210,22 @@ func commandTable(embedded bool) []command {
 			complete: names,
 		},
 		{
+			names:    []string{"releases"},
+			group:    groupDeploying,
+			synopsis: "<name> [tag]",
+			summary:  "Version tags and their GitHub Releases",
+			usages: []usage{
+				{"releases <name>", "List a project's version tags, newest first, and what Lighthouse made of each: known (there before tracking, a pre-release, or deployed by hand), waiting (not on main yet), ready (deploys next), pending (deployed; its GitHub Release is due), published, failed, superseded (never deployed: a newer one was) or moved (the tag changed)."},
+				{"releases <name> <tag>", "Show what a tag's GitHub Release will say: its CHANGELOG.md section at that commit, under a dated heading. Warns when the section or its date is missing."},
+			},
+			examples: []example{
+				{"releases cove", "every tag and its status"},
+				{"releases cove v1.2.0", "check the Release text before it's published"},
+			},
+			run:      (*CLI).releases,
+			complete: names,
+		},
+		{
 			names:    []string{"report"},
 			group:    groupDeploying,
 			synopsis: "<name> [n]",

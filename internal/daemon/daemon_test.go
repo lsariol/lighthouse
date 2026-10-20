@@ -16,6 +16,7 @@ import (
 	"github.com/lsariol/lighthouse/internal/orchestrator"
 	"github.com/lsariol/lighthouse/internal/projects"
 	"github.com/lsariol/lighthouse/internal/projects/projectstest"
+	"github.com/lsariol/lighthouse/internal/settings"
 )
 
 // fakeContainers holds containers per compose project and records actions.
@@ -87,6 +88,12 @@ func (fakeCommits) ComposeFile(ctx context.Context, repo github.Repo, sha string
 func (fakeCommits) LatestCommit(ctx context.Context, repo github.Repo, token string) (string, error) {
 	return "abc", nil
 }
+func (fakeCommits) File(ctx context.Context, repo github.Repo, sha string, name string, token string) ([]byte, error) {
+	return nil, nil
+}
+func (fakeCommits) Contains(ctx context.Context, repo github.Repo, head string, sha string, token string) (bool, error) {
+	return true, nil
+}
 
 // newDaemon returns a running daemon on an in-memory store, with
 // personalWebsite (compose project "website": web, www, bot) watched.
@@ -110,6 +117,42 @@ func newDaemon(t *testing.T) (*Daemon, *fakeContainers, *fakeCompose, *projectst
 	}
 	store.SetComposeProject(ctx, "personalWebsite", "website")
 	return d, c, cmp, store
+}
+
+func TestReleases(t *testing.T) {
+	d, _, _, store := newDaemon(t)
+	ctx := context.Background()
+	store.SetSettings(ctx, "personalWebsite", settings.DeployReleases, settings.TierApp)
+	store.TrackReleases(ctx, "personalWebsite", []projects.Release{{Tag: "v2.0.0-rc.1", SHA: "rc", Status: projects.ReleaseKnown}})
+
+	list, _ := d.Projects(ctx)
+	if !list[0].NoRelease || len(list[0].OpenReleases) != 0 {
+		t.Errorf("only a pre-release: %+v", list[0])
+	}
+
+	store.TrackReleases(ctx, "personalWebsite", []projects.Release{
+		{Tag: "v1.0.0", SHA: "s100", Status: projects.ReleaseWaiting, Note: "not on main"},
+		{Tag: "v0.9.0", SHA: "s090", Status: projects.ReleaseMoved},
+	})
+	list, _ = d.Projects(ctx)
+	if p := list[0]; p.NoRelease || len(p.OpenReleases) != 2 || p.OpenReleases[0].Tag != "v1.0.0" || p.OpenReleases[0].Note != "not on main" {
+		t.Errorf("waiting and moved: %+v", p)
+	}
+
+	releases, err := d.Releases(ctx, "personalwebsite")
+	if err != nil || len(releases) != 3 || releases[1].Commit != "s100" {
+		t.Errorf("Releases = %+v, %v", releases, err)
+	}
+	if _, err := d.Releases(ctx, "nope"); kind(err) != control.KindNotFound {
+		t.Errorf("Releases of a missing project = %v", err)
+	}
+	notes, err := d.ReleaseNotes(ctx, "personalWebsite", "v1.0.0")
+	if err != nil || !strings.HasPrefix(notes.Body, "## v1.0.0 (") || len(notes.Warnings) != 1 {
+		t.Errorf("ReleaseNotes = %+v, %v", notes, err)
+	}
+	if _, err := d.ReleaseNotes(ctx, "personalWebsite", "v3.0.0"); kind(err) != control.KindNotFound || !strings.Contains(err.Error(), "releases personalWebsite") {
+		t.Errorf("ReleaseNotes of an untracked tag = %v", err)
+	}
 }
 
 func kind(err error) string {

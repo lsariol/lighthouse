@@ -115,6 +115,17 @@ func (f *fakeService) History(ctx context.Context, name string, limit int) ([]co
 	}, f.act("history", name)
 }
 
+func (f *fakeService) Releases(ctx context.Context, name string) ([]control.Release, error) {
+	return []control.Release{
+		{Tag: "v1.1.0", Commit: "bbbbbbb22", Status: "waiting", Note: "its commit isn't on the default branch yet", Since: time.Now()},
+		{Tag: "v1.0.0", Commit: "aaaaaaa11", Status: "pending", Since: time.Now()},
+	}, f.act("releases", name)
+}
+func (f *fakeService) ReleaseNotes(ctx context.Context, name string, tag string) (control.ReleaseNotes, error) {
+	return control.ReleaseNotes{Release: control.Release{Tag: tag}, Body: "## " + tag + " (2026-10-20)\n\nNotes.\n",
+		Warnings: []string{"the " + tag + " heading has no date"}}, f.act("release notes "+tag, name)
+}
+
 // run executes one command line on a CLI without a terminal and returns its
 // stdout, stderr and error.
 func run(t *testing.T, svc control.Service, line string) (string, string, error) {
@@ -268,6 +279,50 @@ func TestListNewestDeployFirst(t *testing.T) {
 	}
 	if want := []string{"new", "mid", "old", "never", "unset"}; err != nil || !slices.Equal(names, want) {
 		t.Errorf("list order = %v, want %v (%v)\n%s", names, want, err, out)
+	}
+}
+
+func TestReleases(t *testing.T) {
+	out, errOut, err := run(t, newFake("cove"), "releases cove")
+	if err != nil || !strings.Contains(out, "v1.1.0  bbbbbbb  waiting") || !strings.Contains(errOut, "2 tags.") {
+		t.Errorf("releases: %v\n%s%s", err, out, errOut)
+	}
+	out, errOut, err = run(t, newFake("cove"), "releases cove v1.0.0")
+	if err != nil || out != "## v1.0.0 (2026-10-20)\n\nNotes.\n" || errOut != "! The v1.0.0 heading has no date.\n" {
+		t.Errorf("releases <tag>: %v, out %q, messages %q", err, out, errOut)
+	}
+	var usage usageError
+	if _, _, err := run(t, newFake("cove"), "releases"); !errors.As(err, &usage) {
+		t.Errorf("releases without a name = %v", err)
+	}
+
+	svc := newFake("cove", "plop")
+	old := time.Now().Add(-time.Hour)
+	svc.projects[0].OpenReleases = []control.Release{
+		{Tag: "v1.2.0", Status: "waiting", Note: "its commit isn't on the default branch yet", Since: old},
+		{Tag: "v1.3.0", Status: "waiting", Note: "its commit isn't on the default branch yet", Since: time.Now()},
+		{Tag: "v1.1.0", Status: "moved", Note: "the tag moved from a to b", Since: time.Now()},
+	}
+	svc.projects[1].NoRelease = true
+	_, errOut, _ = run(t, svc, "list")
+	for _, want := range []string{`! "cove" v1.3.0: its commit isn't on the default branch yet.`, `! "cove" v1.1.0: the tag moved`, `! "plop" deploys releases but has no version tag yet`} {
+		if !strings.Contains(errOut, want) {
+			t.Errorf("list lacks %q:\n%s", want, errOut)
+		}
+	}
+
+	svc.status.Projects = svc.projects
+	_, _, err = run(t, svc, "status")
+	if err == nil {
+		t.Fatal("status is healthy")
+	}
+	for _, want := range []string{`"cove" v1.2.0 has waited since`, `"cove" v1.1.0's tag moved`, `"plop" has no release yet`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("status lacks %q: %v", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), "v1.3.0") {
+		t.Errorf("a tag that just started waiting needs attention: %v", err)
 	}
 }
 

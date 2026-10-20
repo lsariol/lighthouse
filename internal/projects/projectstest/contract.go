@@ -259,6 +259,106 @@ func RunStoreTests(t *testing.T, open func(t *testing.T) projects.Store) {
 		}
 	})
 
+	t.Run("TrackedReleases", func(t *testing.T) {
+		s := open(t)
+		s.Add(ctx, "cove", cove)
+		s.Add(ctx, "plop", plop)
+		if p, _ := s.Get(ctx, "cove"); p.ReleasesTracked {
+			t.Error("a new project has its baseline taken")
+		}
+		if list, err := s.Releases(ctx, "cove"); err != nil || len(list) != 0 {
+			t.Errorf("Releases of a new project = %+v, %v", list, err)
+		}
+
+		baseline := []projects.Release{
+			{Tag: "v1.0.0", SHA: "s100", Status: projects.ReleaseKnown, Note: "there before"},
+			{Tag: "v1.1.0", SHA: "s110", Status: projects.ReleaseReady},
+			{Tag: "v1.2.0", SHA: "s120", Status: projects.ReleaseWaiting},
+			{Tag: "v1.3.0", SHA: "s130", Status: projects.ReleaseWaiting},
+		}
+		if err := s.TrackReleases(ctx, "COVE", baseline); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.TrackReleases(ctx, "cove", []projects.Release{{Tag: "v1.0.0", SHA: "other", Status: projects.ReleaseReady}}); err != nil {
+			t.Fatal(err)
+		}
+		list, err := s.Releases(ctx, "cove")
+		if err != nil || len(list) != 4 || list[0].Tag != "v1.0.0" || list[0].SHA != "s100" || list[0].Status != projects.ReleaseKnown ||
+			list[0].Note != "there before" || list[0].Project != "cove" || list[0].CreatedAt.IsZero() {
+			t.Errorf("after tracking twice: %+v, %v", list, err)
+		}
+		if p, _ := s.Get(ctx, "cove"); !p.ReleasesTracked {
+			t.Error("the baseline isn't recorded")
+		}
+		s.TrackReleases(ctx, "plop", []projects.Release{{Tag: "v0.1.0", SHA: "p010", Status: projects.ReleaseReady}})
+		if all, _ := s.Releases(ctx, ""); len(all) != 5 {
+			t.Errorf("every project's releases: %+v", all)
+		}
+
+		if err := s.SetReleaseStatus(ctx, "cove", "v1.2.0", projects.ReleaseReady, ""); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.SetReleaseStatus(ctx, "cove", "v9.0.0", projects.ReleaseReady, ""); !errors.Is(err, projects.ErrNoRelease) {
+			t.Errorf("SetReleaseStatus of a missing tag = %v", err)
+		}
+		if err := s.SetReleaseStatus(ctx, "gone", "v1.0.0", projects.ReleaseReady, ""); !errors.Is(err, projects.ErrNotFound) {
+			t.Errorf("SetReleaseStatus of a missing project = %v", err)
+		}
+		if _, err := s.Releases(ctx, "gone"); !errors.Is(err, projects.ErrNotFound) {
+			t.Errorf("Releases of a missing project = %v", err)
+		}
+
+		now := time.Now().Truncate(time.Millisecond)
+		dep := projects.Deployment{Project: "cove", SHA: "s120", Version: "v1.2.0", Trigger: projects.TriggerCheck,
+			Status: projects.StatusSucceeded, StartedAt: now, FinishedAt: now}
+		if err := s.RecordDeployment(ctx, dep); err != nil {
+			t.Fatal(err)
+		}
+		status := func(tag string) string {
+			list, _ := s.Releases(ctx, "cove")
+			for _, r := range list {
+				if r.Tag == tag {
+					return r.Status
+				}
+			}
+			return "missing"
+		}
+		for tag, want := range map[string]string{"v1.0.0": projects.ReleaseKnown, "v1.1.0": projects.ReleaseSuperseded,
+			"v1.2.0": projects.ReleasePending, "v1.3.0": projects.ReleaseWaiting} {
+			if got := status(tag); got != want {
+				t.Errorf("after deploying v1.2.0: %s is %s, want %s", tag, got, want)
+			}
+		}
+
+		dep.SHA, dep.Version, dep.Trigger = "s140", "v1.4.0", projects.TriggerCheck
+		s.RecordDeployment(ctx, dep)
+		dep.SHA, dep.Version, dep.Trigger = "s130", "v1.3.0", projects.TriggerManual
+		s.RecordDeployment(ctx, dep)
+		if status("v1.4.0") != projects.ReleasePending || status("v1.3.0") != projects.ReleaseSuperseded {
+			t.Errorf("an untracked release deployed by a check: v1.4.0 %s, v1.3.0 %s", status("v1.4.0"), status("v1.3.0"))
+		}
+
+		s.TrackReleases(ctx, "cove", []projects.Release{{Tag: "v1.5.0", SHA: "s150", Status: projects.ReleaseReady}})
+		dep.SHA, dep.Version, dep.Trigger = "s150", "v1.5.0", projects.TriggerManual
+		s.RecordDeployment(ctx, dep)
+		failed := dep
+		failed.SHA, failed.Version, failed.Trigger, failed.Status, failed.FailureKind = "s160", "v1.6.0", projects.TriggerCheck, projects.StatusFailed, projects.FailurePermanent
+		s.RecordDeployment(ctx, failed)
+		if status("v1.5.0") != projects.ReleaseKnown || status("v1.6.0") != "missing" {
+			t.Errorf("deployed by hand: v1.5.0 %s; a failed deploy added v1.6.0: %s", status("v1.5.0"), status("v1.6.0"))
+		}
+
+		s.Rename(ctx, "cove", "vault")
+		if list, err := s.Releases(ctx, "vault"); err != nil || len(list) != 6 || list[0].Project != "vault" {
+			t.Errorf("after a rename: %d releases, %v", len(list), err)
+		}
+		s.Remove(ctx, "vault")
+		s.Add(ctx, "vault", cove)
+		if list, _ := s.Releases(ctx, "vault"); len(list) != 0 {
+			t.Errorf("a re-added project inherited releases: %+v", list)
+		}
+	})
+
 	t.Run("ComposeProject", func(t *testing.T) {
 		s := open(t)
 		s.Add(ctx, "personalWebsite", github.Repo{Owner: "lsariol", Name: "Landing"})
