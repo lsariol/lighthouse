@@ -81,7 +81,8 @@ type Step struct {
 
 const (
 	TriggerCheck     = "check"     // a new commit found by a scheduled or manual scan
-	TriggerManual    = "manual"    // `deploy <name>` or `retry <name>`
+	TriggerManual    = "manual"    // `deploy <name>` or `rollback <name>`
+	TriggerRetry     = "retry"     // `retry <name>`: publishes a ready release it deploys
 	TriggerReconcile = "reconcile" // the reconcile loop brought a project that was down back
 
 	StatusSucceeded  = "succeeded"
@@ -136,9 +137,10 @@ func DeployedReleases(rows []Release, d Deployment) []Release {
 		if r.Tag == d.Version {
 			found = true
 			switch {
-			case d.Trigger == TriggerCheck && r.Status != ReleasePending && r.Status != ReleasePublished:
+			case d.Trigger == TriggerCheck && r.Status != ReleasePending && r.Status != ReleasePublished,
+				d.Trigger == TriggerRetry && r.Status == ReleaseReady:
 				r.Status, r.Note = ReleasePending, ""
-			case d.Trigger == TriggerManual && (r.Status == ReleaseReady || r.Status == ReleaseWaiting):
+			case (d.Trigger == TriggerManual || d.Trigger == TriggerRetry) && (r.Status == ReleaseReady || r.Status == ReleaseWaiting):
 				r.Status, r.Note = ReleaseKnown, "deployed by hand, so it isn't published automatically"
 			default:
 				continue
@@ -211,8 +213,9 @@ type Store interface {
 	// the failure count. A failure becomes the last error; a permanent one
 	// counts toward BrokenAfter (counting restarts with a new commit).
 	// A stable release deployed by a check becomes pending (its row is
-	// added if missing), one deployed by hand becomes known, and lower ones
-	// still waiting or ready become superseded; all in the same transaction.
+	// added if missing), as does a ready one deployed by a retry; one
+	// deployed by hand becomes known, and lower ones still waiting or ready
+	// become superseded; all in the same transaction.
 	RecordDeployment(ctx context.Context, d Deployment) error
 
 	// Releases returns a project's tracked version tags, or every project's

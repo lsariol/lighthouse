@@ -485,6 +485,10 @@ func (o *Orchestrator) record(ctx context.Context, name string, err error, setEr
 
 // Deploy deploys a project now: ref (a tag or commit), or its newest.
 func (o *Orchestrator) Deploy(ctx context.Context, name string, ref string) error {
+	return o.deployRef(ctx, name, ref, projects.TriggerManual)
+}
+
+func (o *Orchestrator) deployRef(ctx context.Context, name string, ref string, trigger string) error {
 	p, err := o.store.Get(ctx, name)
 	if err != nil {
 		return err
@@ -493,11 +497,11 @@ func (o *Orchestrator) Deploy(ctx context.Context, name string, ref string) erro
 	if err != nil {
 		return err
 	}
-	return o.deployByHand(ctx, p, t, ref == "")
+	return o.deployByHand(ctx, p, t, ref == "", trigger)
 }
 
-// deployByHand deploys t for `deploy` or `rollback`.
-func (o *Orchestrator) deployByHand(ctx context.Context, p projects.Project, t target, latest bool) error {
+// deployByHand deploys t for `deploy`, `rollback` or `retry`.
+func (o *Orchestrator) deployByHand(ctx context.Context, p projects.Project, t target, latest bool, trigger string) error {
 	if p.Stopped {
 		if err := o.store.SetStopped(ctx, p.Name, false); err != nil {
 			return fmt.Errorf("record that %s is no longer stopped: %w", p.Name, err)
@@ -508,7 +512,7 @@ func (o *Orchestrator) deployByHand(ctx context.Context, p projects.Project, t t
 	}
 	w := o.watchOf(p.Name)
 	w.backoff, w.nextAttempt = 0, time.Time{}
-	return o.deploy(ctx, p, t, projects.TriggerManual)
+	return o.deploy(ctx, p, t, trigger)
 }
 
 // hold records what a project that deploys its branch went back from, so
@@ -550,7 +554,7 @@ func (o *Orchestrator) Rollback(ctx context.Context, name string) (string, error
 	for _, d := range history {
 		if d.Status == projects.StatusSucceeded && d.SHA != "" && d.SHA != p.DeployedSHA {
 			t := target{sha: d.SHA, version: d.Version}
-			return t.String(), o.deployByHand(ctx, p, t, false)
+			return t.String(), o.deployByHand(ctx, p, t, false, projects.TriggerManual)
 		}
 	}
 	return "", ErrNothingToRollBackTo
@@ -641,7 +645,7 @@ func (o *Orchestrator) Retry(ctx context.Context, name string) error {
 	if err := o.store.ClearFailures(ctx, name); err != nil {
 		return err
 	}
-	return o.Deploy(ctx, name, "")
+	return o.deployRef(ctx, name, "", projects.TriggerRetry)
 }
 
 // RecordHandOffs records Lighthouse's own updates once the helper has

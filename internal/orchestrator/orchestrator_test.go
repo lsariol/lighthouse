@@ -397,8 +397,33 @@ func TestRetry(t *testing.T) {
 	if a := get(t, store, "a"); a.Broken || a.DeployedSHA != "aaa" {
 		t.Errorf("after retry: %+v", a)
 	}
-	if h, _ := store.Deployment(context.Background(), "a", 1); h.Trigger != projects.TriggerManual {
+	if h, _ := store.Deployment(context.Background(), "a", 1); h.Trigger != projects.TriggerRetry {
 		t.Errorf("retry's trigger = %q", h.Trigger)
+	}
+}
+
+// A release that broke a project and then deployed with `retry` is published
+// like one a check deployed.
+func TestRetryPublishes(t *testing.T) {
+	gh := newGitHub(map[string]string{"cove": "h1"})
+	gh.repos["cove"].compose = releases("app")
+	gh.repos["cove"].tags = []github.Tag{{Name: "v1.0.0", SHA: "s100"}}
+	o, store, d, _ := setup(t, gh, "cove")
+	ctx := context.Background()
+	d.result = failing(projects.FailurePermanent)
+	for i := 0; i < projects.BrokenAfter; i++ {
+		o.Scan(ctx)
+	}
+	if p := get(t, store, "cove"); !p.Broken || statuses(t, store, "cove") != "v1.0.0=ready" {
+		t.Fatalf("broken %v, %s", p.Broken, statuses(t, store, "cove"))
+	}
+
+	d.result = nil
+	if err := o.Retry(ctx, "cove"); err != nil {
+		t.Fatal(err)
+	}
+	if got := statuses(t, store, "cove"); got != "v1.0.0=pending" {
+		t.Errorf("after a successful retry: %s", got)
 	}
 }
 

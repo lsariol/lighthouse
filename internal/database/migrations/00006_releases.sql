@@ -6,8 +6,14 @@
 -- releases:        one row per version tag of a project, and what Lighthouse
 --                  made of it (projects.Release* in the code says what each
 --                  status means). Rows go when the project is removed.
+-- deployments.trigger: 'retry' (`retry <name>`), apart from 'manual', since a
+--                  successful retry of a ready release publishes it.
 
 -- +goose Up
+ALTER TABLE lighthouse.deployments DROP CONSTRAINT deployments_trigger_check;
+ALTER TABLE lighthouse.deployments
+    ADD CONSTRAINT deployments_trigger_check CHECK (trigger IN ('check', 'manual', 'retry', 'reconcile'));
+
 ALTER TABLE lighthouse.projects
     ADD COLUMN releases_tracked_at timestamptz;
 

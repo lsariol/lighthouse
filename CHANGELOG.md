@@ -14,10 +14,7 @@ Lighthouse starts tracking each project's version tags, the first step toward pu
 ### Changed
 - **A release deploys only once its commit is on the default branch.** A tag pushed before `main` waits, and deploys on the first check after `main` contains it.
 - Version tags are compared as SemVer, pre-releases included; pre-releases are still never deployed automatically.
-
-## v1.0.4 (unreleased)
-
-### Changed
+- `retry` is recorded with its own trigger, `retry`, instead of `manual`: a release it deploys counts as deployed by a check.
 - **Tests run in the Dockerfile's `test` stage instead of GitHub Actions.** Every deploy of Lighthouse runs gofmt, vet and the tests with `-race` first, and a failure stops the deploy. The database tests, `govulncheck` and the checks that need Docker run locally (DOCUMENTATION.md §13.1).
 
 ## v1.0.3 (2026-10-20)

@@ -315,7 +315,7 @@ For a project that deploys releases, Lighthouse records every version tag and wh
 | `superseded` | Never deployed: a newer release deployed first, or it isn't newer than one already deployed (versions only move forward) | Never deployed or published automatically |
 | `moved` | The tag now points at another commit than when it was first seen | Never deployed or published; `status` mentions it |
 
-- **Pending is set in the same transaction that records the deploy**, so a restart can't lose it. Deploys by hand (`deploy`, `rollback`), retries of the running version and the reconcile loop never make a release pending.
+- **Pending is set in the same transaction that records the deploy**, so a restart can't lose it. A ready release that `retry` deploys (after it broke the project) becomes pending too. Deploys by hand (`deploy`, `rollback`) and the reconcile loop never make a release pending.
 - **The Release text** is the version's section of `CHANGELOG.md` at the tag's commit, under the heading `## vX.Y.Z (YYYY-MM-DD)`: the date written in the CHANGELOG, or the publication date with a warning when the heading has none. Without a section the text is "No notes for this version." Headings may be written `## v1.2.3 (2026-10-20)`, `## v1.2.3` or `## [1.2.3] — 2026-10-20`.
 - `list` shows a project's waiting and moved tags, and a project that deploys releases but has no version tag yet; `status` lists them under "Needs attention".
 
@@ -381,7 +381,7 @@ Lighthouse's state is in `lighthouse_db` on sparkdb, schema `lighthouse`. Roles,
 |---|---|
 | `project_id` | Its project; the rows go when the project is removed |
 | `sha`, `version` | The commit deployed, and the release it is (release mode) |
-| `trigger` | `check` (something new found by a check or `scan`), `manual` (`deploy`, `retry`) or `reconcile` (brought back by the reconcile loop) |
+| `trigger` | `check` (something new found by a check or `scan`), `manual` (`deploy`, `rollback`), `retry` (`retry`, since v1.1.0; `manual` before) or `reconcile` (brought back by the reconcile loop) |
 | `status` | `succeeded`, `failed` (nothing changed) or `rolled_back` (the previous version was put back) |
 | `failure_kind`, `failed_step` | For a failure: `transient`/`permanent`, and the step |
 | `started_at`, `finished_at`, `error` | |
@@ -921,6 +921,7 @@ These rules apply to every change, on every project on the server. They come fro
   | `00003_pipeline` | `projects`: `compose_project` (unique), `failure_count`, `failing_sha`, `broken`; `deployments`: `rolled_back` status, `failure_kind`, `failed_step`; `deployment_steps` (append-only for the app) |
   | `00004_orchestrator` | `projects`: `deployed_version`, `highest_version`, `deploy_mode`, `tier`, `stopped`; `deployments`: `version`, the `reconcile` trigger |
   | `00005_held_commit` | `projects.held_sha`: the commit a rollback went back from, which checks don't redeploy |
+  | `00006_releases` | `releases` (read, add and update for the app) and `projects.releases_tracked_at` ([§4.7](#47-releases)); `deployments`: the `retry` trigger |
 
   `lighthouse migrate status` lists them with the time each was applied.
 

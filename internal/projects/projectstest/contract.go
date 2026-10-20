@@ -338,9 +338,17 @@ func RunStoreTests(t *testing.T, open func(t *testing.T) projects.Store) {
 			t.Errorf("an untracked release deployed by a check: v1.4.0 %s, v1.3.0 %s", status("v1.4.0"), status("v1.3.0"))
 		}
 
-		s.TrackReleases(ctx, "cove", []projects.Release{{Tag: "v1.5.0", SHA: "s150", Status: projects.ReleaseReady}})
+		s.TrackReleases(ctx, "cove", []projects.Release{{Tag: "v1.5.0", SHA: "s150", Status: projects.ReleaseReady},
+			{Tag: "v1.5.1", SHA: "s151", Status: projects.ReleaseReady}, {Tag: "v1.5.2", SHA: "s152", Status: projects.ReleaseWaiting}})
 		dep.SHA, dep.Version, dep.Trigger = "s150", "v1.5.0", projects.TriggerManual
 		s.RecordDeployment(ctx, dep)
+		dep.SHA, dep.Version, dep.Trigger = "s151", "v1.5.1", projects.TriggerRetry
+		s.RecordDeployment(ctx, dep)
+		dep.SHA, dep.Version, dep.Trigger = "s152", "v1.5.2", projects.TriggerRetry
+		s.RecordDeployment(ctx, dep)
+		if status("v1.5.1") != projects.ReleasePending || status("v1.5.2") != projects.ReleaseKnown {
+			t.Errorf("retried: ready v1.5.1 is %s (want pending), waiting v1.5.2 is %s (want known)", status("v1.5.1"), status("v1.5.2"))
+		}
 		failed := dep
 		failed.SHA, failed.Version, failed.Trigger, failed.Status, failed.FailureKind = "s160", "v1.6.0", projects.TriggerCheck, projects.StatusFailed, projects.FailurePermanent
 		s.RecordDeployment(ctx, failed)
@@ -349,7 +357,7 @@ func RunStoreTests(t *testing.T, open func(t *testing.T) projects.Store) {
 		}
 
 		s.Rename(ctx, "cove", "vault")
-		if list, err := s.Releases(ctx, "vault"); err != nil || len(list) != 6 || list[0].Project != "vault" {
+		if list, err := s.Releases(ctx, "vault"); err != nil || len(list) != 8 || list[0].Project != "vault" {
 			t.Errorf("after a rename: %d releases, %v", len(list), err)
 		}
 		s.Remove(ctx, "vault")
