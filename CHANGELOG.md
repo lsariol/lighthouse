@@ -2,7 +2,7 @@
 
 All notable changes to Lighthouse. Versions follow [semantic versioning](https://semver.org).
 
-## v1.2.0 (unreleased)
+## v1.2.0 (2026-10-20)
 
 Lighthouse publishes Releases for repositories it doesn't deploy, such as Go libraries.
 
