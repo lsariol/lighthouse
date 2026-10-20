@@ -20,6 +20,8 @@ services:
       - STAGING_PATH=/srv/server/staging
       - STORAGE_PATH=/srv/server/storage
       - BACKUP_PATH=/srv/backups
+      # The GitHub App that publishes Releases; its key is LIGHTHOUSE_GITHUB_APP_SECRET in Cove.
+      - GITHUB_APP_ID=5403106
     # Staging, storage and backups are mounted at the same path as on the host.
     volumes:
       - type: bind
