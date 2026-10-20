@@ -2,12 +2,12 @@
 
 All notable changes to Lighthouse. Versions follow [semantic versioning](https://semver.org).
 
-## v1.0.3
+## v1.0.3 (2026-10-20)
 
 ### Changed
 - **`list` shows the newest deploy first.** Projects that have never deployed come last, by name.
 
-## v1.0.2
+## v1.0.2 (2026-10-07)
 
 ### Fixed
 - **A project's settings come only from its default branch.** Deploying an older tag whose compose file predates its `x-lighthouse` block flipped the project back to deploying its branch, which then redeployed it. `deploy` and `check` also read the branch's settings first, so a release-mode project that hasn't been checked yet deploys its newest release.
@@ -18,7 +18,7 @@ All notable changes to Lighthouse. Versions follow [semantic versioning](https:/
 ### Changed
 - Comments trimmed throughout: none inside functions unless they prevent a mistake, one-line descriptions. No behaviour change.
 
-## v1.0.1
+## v1.0.1 (2026-10-07)
 
 ### Fixed
 - **Self-update could repeat itself and then stall.** The Lighthouse that starts during the swap saw its own project as not yet deployed and handed off again, which removed the first helper mid-check; and when the swap changed nothing, the old Lighthouse waited forever to be replaced, paused. Now nothing deploys Lighthouse while its helper is working (refused before anything is downloaded), and a Lighthouse that isn't replaced records the helper's result and carries on.
@@ -26,7 +26,7 @@ All notable changes to Lighthouse. Versions follow [semantic versioning](https:/
 - A self-update is no longer logged as a failed check.
 - `check` no longer says a failure "counts toward broken": a dry run records nothing.
 
-## v1.0.0
+## v1.0.0 (2026-10-07)
 
 A rewrite of the pre-1.0 Lighthouse into a self-sufficient deployer: safe deploys that roll back, rules a project can't break out of, release-tag projects, infrastructure ordering and backups, recovery of projects that go down, and updates of itself. Moving from pre-1.0: DOCUMENTATION.md §10, "Upgrading from the pre-1.0 Lighthouse".
 
