@@ -3,6 +3,7 @@ package policy
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -23,6 +24,17 @@ type Input struct {
 // readOnlyHostFiles may be mounted read-only by anyone: they're harmless, and
 // common (a container's time zone).
 var readOnlyHostFiles = map[string]bool{"/etc/localtime": true, "/etc/timezone": true}
+
+// URLLabel is the label on a service that's reached from outside: its public
+// https:// address, for Sonar and the status page.
+const URLLabel = "spark.url"
+
+// publicURL reports whether v is a full https:// URL with a host and no
+// user or password.
+func publicURL(v string) bool {
+	u, err := url.Parse(v)
+	return err == nil && u.Scheme == "https" && u.Hostname() != "" && u.User == nil && !strings.ContainsAny(v, " \t\n")
+}
 
 // Check returns everything in the compose file the rules refuse or warn
 // about.
@@ -80,22 +92,23 @@ type fileSource struct {
 }
 
 type service struct {
-	Privileged        bool       `json:"privileged"`
-	NetworkMode       string     `json:"network_mode"`
-	Pid               string     `json:"pid"`
-	Ipc               string     `json:"ipc"`
-	Uts               string     `json:"uts"`
-	UsernsMode        string     `json:"userns_mode"`
-	Cgroup            string     `json:"cgroup"`
-	CapAdd            []string   `json:"cap_add"`
-	Devices           []pathItem `json:"devices"`
-	DeviceCgroupRules []string   `json:"device_cgroup_rules"`
-	SecurityOpt       []string   `json:"security_opt"`
-	VolumesFrom       []string   `json:"volumes_from"`
-	Volumes           []mount    `json:"volumes"`
-	EnvFile           []pathItem `json:"env_file"`
-	Build             *build     `json:"build"`
-	ContainerName     string     `json:"container_name"`
+	Privileged        bool              `json:"privileged"`
+	NetworkMode       string            `json:"network_mode"`
+	Pid               string            `json:"pid"`
+	Ipc               string            `json:"ipc"`
+	Uts               string            `json:"uts"`
+	UsernsMode        string            `json:"userns_mode"`
+	Cgroup            string            `json:"cgroup"`
+	CapAdd            []string          `json:"cap_add"`
+	Devices           []pathItem        `json:"devices"`
+	DeviceCgroupRules []string          `json:"device_cgroup_rules"`
+	SecurityOpt       []string          `json:"security_opt"`
+	VolumesFrom       []string          `json:"volumes_from"`
+	Volumes           []mount           `json:"volumes"`
+	EnvFile           []pathItem        `json:"env_file"`
+	Build             *build            `json:"build"`
+	ContainerName     string            `json:"container_name"`
+	Labels            map[string]string `json:"labels"`
 	Networks          map[string]*struct {
 		Aliases []string `json:"aliases"`
 	} `json:"networks"`
@@ -174,6 +187,9 @@ func (c *checker) warn(service string, format string, args ...any) {
 }
 
 func (c *checker) service(name string, s service) {
+	if v, ok := s.Labels[URLLabel]; ok && !publicURL(v) {
+		c.add(name, "label:"+URLLabel, "label %s=%q isn't a public address: write the full https:// URL the service is reached at, e.g. https://name.mobasity.com", URLLabel, v)
+	}
 	if s.Privileged {
 		c.add(name, "privileged", "privileged: true gives the container root on the host")
 	}

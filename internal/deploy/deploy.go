@@ -558,6 +558,11 @@ func (r *run) check(ctx context.Context, project compose.Project, dir string, ke
 		return permanent(err)
 	}
 	refused := r.d.policy.Apply(project.Name, findings)
+	services := make([]string, 0, len(project.Services))
+	for _, s := range project.Services {
+		services = append(services, s.Name)
+	}
+	findings = append(findings, r.d.policy.UnknownServices(project.Name, services)...)
 	for _, f := range findings {
 		fmt.Fprintln(out, f)
 	}

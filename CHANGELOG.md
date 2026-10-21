@@ -2,6 +2,12 @@
 
 All notable changes to Lighthouse. Versions follow [semantic versioning](https://semver.org).
 
+## v1.3.0 (unreleased)
+
+### Added
+- **Exceptions for one service:** an exception in `policy.json` can name a `service`, and then allows only that service's findings; a project's other services still can't have them (DOCUMENTATION.md §7.1). An exception naming a service the compose file doesn't have is a warning at the `check` step.
+- **The `spark.url` label:** a service reached from outside carries its public address, `spark.url=https://…`, for Sonar and the status page (DOCUMENTATION.md §7). A value that isn't a full `https://` address stops the deploy (`label:spark.url`).
+
 ## v1.2.2 (2026-10-20)
 
 ### Changed

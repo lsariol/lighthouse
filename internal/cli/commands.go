@@ -482,15 +482,18 @@ deploy (the ID in brackets is what an exception names):
     SHARED_*
   a name on spark another project's        [name:web]
     container already has
+  a spark.url label that isn't a full      [label:spark.url]
+    https:// address
 
 A port published on every interface is only a warning.
 
-Allowing something (one project at a time):
+Allowing something (one project, or one of its services, at a time):
 1. Add an exception to policy.json in Lighthouse's repository:
-     {"project": "sonar", "allow": ["mount:/var/run/docker.sock"],
-      "reason": "reads container stats"}
-   project is the compose project; an ID ending in * allows every ID that
-   starts with what comes before it.
+     {"project": "sonar", "service": "agent", "allow": ["mount:/proc"],
+      "reason": "samples host metrics"}
+   project is the compose project; service (optional) limits it to that
+   service's findings; an ID ending in * allows every ID that starts
+   with what comes before it.
 2. Commit it, and deploy Lighthouse.
 3. "check <name>" shows the finding as allowed; "retry <name>" deploys.`
 

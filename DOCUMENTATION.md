@@ -462,6 +462,7 @@ What a repository needs for Lighthouse to deploy it. `lighthouse help setup` is 
 9. **Unique names on `spark`.** Docker's DNS on a shared network answers every container that has a name: a service called `web` in two projects on `spark` makes `http://web` reach either, at random. A deploy whose service name, `container_name` or alias on `spark` is another project's is refused. Compose adds every service's own name to its networks too, so a service called `web` on `spark` clashes with any other project's `web`.
 10. **Join the external `spark` network** to reach Cove, sparkdb or each other (`sparkdb:5432`, `cove:2100`).
 11. **A `test` stage in the Dockerfile** (optional): `FROM … AS test` is built before every deploy, with no secrets; if it fails, nothing is deployed. Put the project's tests, linters and scanners there.
+12. **A `spark.url` label on each service reached from outside**: its full public address, `labels: [spark.url=https://marquee.mobasity.com]`. Sonar reads it from Docker to check the service is up and to show it on the status page. Only on the service that serves it (internal services have none); a value that isn't a full `https://` address stops the deploy ([§7.1](#71-the-deploy-rules)).
 
 **Minimal example** (a site with a web service and a worker):
 
@@ -473,6 +474,8 @@ services:
     build: .
     container_name: website-web           # unique on spark; cloudflared routes to http://website-web:3000
     restart: unless-stopped
+    labels:
+      - spark.url=https://website.mobasity.com   # its public address, for Sonar and the status page
     environment:
       - DATABASE_URL=${WEBSITE_DATABASE_URL}   # secret: fetched from Cove
       - TMDB_API_KEY=${SHARED_TMDB_API_KEY}    # shared secret
@@ -520,20 +523,21 @@ Lighthouse deploys whatever is on `main` with full control of the server's Docke
 | A `${KEY}` that isn't `<COMPOSE PROJECT>_*` (capitals, `-` as `_`) or `SHARED_*` | `secret:BOTSUITE_COVE_TOKEN` |
 | A name on `spark` (service name, `container_name` or alias) that another project's container already answers to: requests for it would reach either | `name:web` |
 | `build:` with `privileged`, `network: host` or `entitlements` | `build:privileged`, `build:network:host` |
+| A `spark.url` label that isn't a full `https://` address with a host (no user or password) | `label:spark.url` |
 
 A port published on every interface (`"2400:2400"`) is only a warning: anything on the local network can reach it, around Cloudflare.
 
-**Exceptions** live in `policy.json` at the top of Lighthouse's repository, built into the binary: a change is reviewed in git and takes effect when Lighthouse is deployed. Each names the compose project, the IDs it allows (an ID ending in `*` allows every ID starting with what comes before it), and why:
+**Exceptions** live in `policy.json` at the top of Lighthouse's repository, built into the binary: a change is reviewed in git and takes effect when Lighthouse is deployed. Each names the compose project, the IDs it allows (an ID ending in `*` allows every ID starting with what comes before it), and why. With `service` (the service's key in the compose file, not its `container_name`), it allows only that service's findings, so a project's other services still can't have them:
 
 ```json
 {
   "exceptions": [
-    {"project": "sonar", "allow": ["mount:/var/run/docker.sock"], "reason": "reads container stats for the dashboard"}
+    {"project": "sonar", "service": "agent", "allow": ["mount:/proc", "mount:/sys"], "reason": "the agent samples host metrics; the API has no host access"}
   ]
 }
 ```
 
-A finding an exception allows is still shown, marked `allowed by policy.json: <reason>`. A malformed `policy.json` (an unknown field, an exception without a reason, `"*"`) fails Lighthouse's tests and its startup. `lh check <name>` runs a project's latest commit through the rules and its test stage without deploying it; `lh help rules` is the short version of this section.
+A finding that belongs to the project rather than a service (another project's network or volume) can only be allowed by an exception without `service`. An exception naming a service the compose file doesn't have is a warning at the `check` step, so a misspelling doesn't quietly allow nothing. A finding an exception allows is still shown, marked `allowed by policy.json: <reason>`. A malformed `policy.json` (an unknown field, an exception without a reason, `"*"`) fails Lighthouse's tests and its startup. `lh check <name>` runs a project's latest commit through the rules and its test stage without deploying it; `lh help rules` is the short version of this section.
 
 ### 7.2 Lighthouse settings (`x-lighthouse`)
 

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -23,14 +24,19 @@ type Policy struct {
 	Exceptions []Exception `json:"exceptions"`
 }
 
-// Exception allows a compose project what the rules would refuse.
+// Exception allows a compose project, or one of its services, what the rules
+// would refuse.
 type Exception struct {
 	Project string   `json:"project"`
+	Service string   `json:"service,omitempty"` // only this service's findings; "" for the whole project
 	Allow   []string `json:"allow"`
 	Reason  string   `json:"reason"`
 }
 
-var composeName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+var (
+	composeName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+	serviceName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
+)
 
 // Parse reads policy.json.
 func Parse(data []byte) (Policy, error) {
@@ -44,6 +50,8 @@ func Parse(data []byte) (Policy, error) {
 		switch {
 		case !composeName.MatchString(e.Project):
 			return Policy{}, fmt.Errorf("policy.json: exception %d: project %q isn't a compose project name (lowercase letters, digits, - and _)", i+1, e.Project)
+		case e.Service != "" && !serviceName.MatchString(e.Service):
+			return Policy{}, fmt.Errorf("policy.json: exception %d (%s): service %q isn't a compose service name (letters, digits, -, _ and .)", i+1, e.Project, e.Service)
 		case len(e.Allow) == 0:
 			return Policy{}, fmt.Errorf("policy.json: exception %d (%s): allow is empty", i+1, e.Project)
 		case strings.TrimSpace(e.Reason) == "":
@@ -58,10 +66,11 @@ func Parse(data []byte) (Policy, error) {
 	return p, nil
 }
 
-// allowed returns the reason project may have the finding id, if it may.
-func (p Policy) allowed(project string, id string) (string, bool) {
+// allowed returns the reason project's service may have the finding id, if
+// it may.
+func (p Policy) allowed(project string, service string, id string) (string, bool) {
 	for _, e := range p.Exceptions {
-		if e.Project != project {
+		if e.Project != project || e.Service != "" && e.Service != service {
 			continue
 		}
 		for _, a := range e.Allow {
@@ -82,13 +91,26 @@ func (p Policy) Apply(project string, findings []Finding) []Finding {
 		if f.Warning {
 			continue
 		}
-		if reason, ok := p.allowed(project, f.ID); ok {
+		if reason, ok := p.allowed(project, f.Service, f.ID); ok {
 			f.Allowed = reason
 			continue
 		}
 		refused = append(refused, *f)
 	}
 	return refused
+}
+
+// UnknownServices warns about exceptions for project that name a service its
+// compose file doesn't have, so a misspelled one doesn't quietly do nothing.
+func (p Policy) UnknownServices(project string, services []string) []Finding {
+	var warnings []Finding
+	for _, e := range p.Exceptions {
+		if e.Project == project && e.Service != "" && !slices.Contains(services, e.Service) {
+			warnings = append(warnings, Finding{Warning: true,
+				Problem: fmt.Sprintf("policy.json has an exception for service %q, which the compose file doesn't have (its services: %s)", e.Service, strings.Join(services, ", "))})
+		}
+	}
+	return warnings
 }
 
 // Finding is one thing a compose file asks for that the rules refuse (or,

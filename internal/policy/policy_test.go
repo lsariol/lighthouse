@@ -242,8 +242,61 @@ func TestExceptions(t *testing.T) {
 	}
 }
 
+// An exception with a service allows only that service's findings.
+func TestServiceExceptions(t *testing.T) {
+	p, err := Parse([]byte(`{"exceptions": [
+		{"project": "sonar", "service": "agent", "allow": ["mount:/proc", "mount:/var/run/docker.sock"], "reason": "the agent samples host metrics"},
+		{"project": "sonar", "allow": ["cap_add:NET_RAW"], "reason": "every service pings"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fs := []Finding{
+		{ID: "mount:/proc", Service: "agent"},
+		{ID: "mount:/var/run/docker.sock", Service: "api"},
+		{ID: "cap_add:NET_RAW", Service: "api"},
+		{ID: "network:other_default"},
+	}
+	refused := p.Apply("sonar", fs)
+	if got := strings.Join(ids(refused), ","); got != "mount:/var/run/docker.sock,network:other_default" {
+		t.Errorf("refused %s; want the api's socket and the project-wide network", got)
+	}
+	if fs[0].Allowed != "the agent samples host metrics" || fs[2].Allowed != "every service pings" {
+		t.Errorf("allowed: %+v", fs)
+	}
+
+	if w := p.UnknownServices("sonar", []string{"agent", "api"}); len(w) != 0 {
+		t.Errorf("warnings for a known service: %v", w)
+	}
+	w := p.UnknownServices("sonar", []string{"collector", "api"})
+	if len(w) != 1 || !w[0].Warning || !strings.Contains(w[0].Problem, `service "agent"`) || !strings.Contains(w[0].Problem, "collector, api") {
+		t.Errorf("a misspelled service: %v", w)
+	}
+	if w := p.UnknownServices("other", nil); len(w) != 0 {
+		t.Errorf("warnings for another project: %v", w)
+	}
+}
+
+func TestURLLabel(t *testing.T) {
+	s := newSetup(t)
+	for _, good := range []string{"https://marquee.mobasity.com", "https://plop.mobasity.com/", "https://example.org/status?x=1"} {
+		if got := ids(s.check(t, cfg(t, map[string]any{"labels": map[string]string{"spark.url": good}}, nil))); len(got) != 0 {
+			t.Errorf("%q refused: %v", good, got)
+		}
+	}
+	for _, bad := range []string{"", "marquee.mobasity.com", "http://marquee.mobasity.com", "https://", "https://user:pw@host.com", "https://host .com", "ftp://host.com"} {
+		got := ids(s.check(t, cfg(t, map[string]any{"labels": map[string]string{"spark.url": bad}}, nil)))
+		if !slices.Equal(got, []string{"label:spark.url"}) {
+			t.Errorf("%q: findings %v, want label:spark.url", bad, got)
+		}
+	}
+	if got := ids(s.check(t, cfg(t, map[string]any{"labels": map[string]string{"com.example.url": "not a url"}}, nil))); len(got) != 0 {
+		t.Errorf("another label was checked: %v", got)
+	}
+}
+
 func TestParseRefusesSloppyPolicies(t *testing.T) {
 	for _, bad := range []string{
+		`{"exceptions": [{"project": "x", "service": "has space", "allow": ["privileged"], "reason": "r"}]}`,
 		`{"exceptions": [{"project": "x", "allow": ["privileged"]}]}`,
 		`{"exceptions": [{"project": "x", "allow": [], "reason": "r"}]}`,
 		`{"exceptions": [{"project": "x", "allow": ["*"], "reason": "r"}]}`,
