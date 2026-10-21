@@ -2,7 +2,7 @@
 
 All notable changes to Lighthouse. Versions follow [semantic versioning](https://semver.org).
 
-## v1.2.2 (unreleased)
+## v1.2.2 (2026-10-20)
 
 ### Changed
 - **`list` is narrower:** NAME, MODE, VERSION and DEPLOYED. MODE says `tags`, `commits` or `publish-only` (with the tier for `infra` and `data`); VERSION is just the release, or the commit for a project that deploys commits. `list --all` (`-a`) adds the repository and the last check.
