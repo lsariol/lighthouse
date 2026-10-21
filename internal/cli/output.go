@@ -131,19 +131,6 @@ func deployed(version string, sha string) string {
 	return shortSHA(sha)
 }
 
-// follows says what a project deploys, and its tier if it isn't an app:
-// "commits", "releases, infra".
-func follows(mode string, tier string) string {
-	s := "commits"
-	if mode == "releases" {
-		s = "releases"
-	}
-	if tier != "" && tier != "app" {
-		s += ", " + tier
-	}
-	return s
-}
-
 func orDash(s string) string {
 	if s == "" {
 		return "-"

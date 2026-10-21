@@ -84,8 +84,13 @@ func commandTable(embedded bool) []command {
 			names:    []string{"list", "ls", "l"},
 			group:    groupProjects,
 			summary:  "Watched projects and their last deploy",
-			usages:   []usage{{"list", "List every watched project, newest deploy first, with its repository, deployed commit, last deploy and last check, and any error from the last check."}},
-			examples: []example{{"list", "everything Lighthouse watches"}},
+			synopsis: "[--all]",
+			usages: []usage{
+				{"list", "List every watched project, newest deploy first: what Lighthouse does with it (deploys tags or commits, or only publishes Releases), the version it runs or last published (or the commit), and when; then any problems."},
+				{"list --all", "Also each project's repository and last check."},
+			},
+			flags:    []flag{{"--all, -a", "Show the repository and last check too."}},
+			examples: []example{{"list", "everything Lighthouse watches"}, {"list -a", "with repositories"}},
 			run:      (*CLI).list,
 		},
 		{

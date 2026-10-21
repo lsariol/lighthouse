@@ -59,6 +59,9 @@ func fakeGitHub(t *testing.T) Client {
 		switch r.URL.Path {
 		case "/repos/o/good/commits":
 			w.Write([]byte(`[{"sha":"abc123"}]`))
+		case "/repos/o/blank/commits":
+			w.WriteHeader(http.StatusConflict)
+			w.Write([]byte(`{"message":"Git Repository is empty."}`))
 		case "/repos/o/empty/commits":
 			w.Write([]byte(`[]`))
 		case "/repos/o/weird/commits":
@@ -148,6 +151,11 @@ func TestLatestCommit(t *testing.T) {
 
 	if _, err := c.LatestCommit(ctx, Repo{"o", "good"}, ""); err == nil {
 		t.Error("no token: no error")
+	}
+	for _, repo := range []string{"empty", "blank"} {
+		if _, err := c.LatestCommit(ctx, Repo{"o", repo}, "t"); !errors.Is(err, ErrEmptyRepository) {
+			t.Errorf("%s: err = %v, want ErrEmptyRepository", repo, err)
+		}
 	}
 
 	unreachable := Client{API: "http://127.0.0.1:1"}

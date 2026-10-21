@@ -25,6 +25,7 @@ type fakeRepo struct {
 	tags      []github.Tag
 	compose   string
 	down      bool
+	empty     bool              // no commits yet
 	offBranch map[string]bool   // commits not on the default branch
 	files     map[string]string // other files at the top, the same at every commit
 	releases  []github.Release  // its GitHub Releases
@@ -71,6 +72,9 @@ func (g *fakeGitHub) CheckCommit(ctx context.Context, r github.Repo, token strin
 	rp, err := g.repo(r, token)
 	if err != nil {
 		return "", "", err
+	}
+	if rp.empty {
+		return "", "", &github.Error{Status: 409, Err: github.ErrEmptyRepository}
 	}
 	if tag := `"` + rp.head + `"`; etag == tag {
 		g.calls["commits 304"]++

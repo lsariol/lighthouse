@@ -2,6 +2,14 @@
 
 All notable changes to Lighthouse. Versions follow [semantic versioning](https://semver.org).
 
+## v1.2.2 (unreleased)
+
+### Changed
+- **`list` is narrower:** NAME, MODE, VERSION and DEPLOYED. MODE says `tags`, `commits` or `publish-only` (with the tier for `infra` and `data`); VERSION is just the release, or the commit for a project that deploys commits. `list --all` (`-a`) adds the repository and the last check.
+
+### Fixed
+- **A repository with no commits yet** (GitHub's "409 Git Repository is empty") is no longer reported as a failed check on every check: there's simply nothing to deploy or publish yet.
+
 ## v1.2.1 (2026-10-20)
 
 ### Changed

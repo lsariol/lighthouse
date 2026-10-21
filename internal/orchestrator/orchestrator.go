@@ -284,6 +284,9 @@ func (o *Orchestrator) tags(ctx context.Context, p *projects.Project, w *watch) 
 // latest finds what p should run next; ok is false when nothing is new.
 func (o *Orchestrator) latest(ctx context.Context, p *projects.Project, w *watch) (target, bool, error) {
 	sha, err := o.head(ctx, p, w)
+	if errors.Is(err, github.ErrEmptyRepository) {
+		return target{}, false, nil
+	}
 	if err != nil {
 		return target{}, false, err
 	}
@@ -436,7 +439,12 @@ func (o *Orchestrator) adopt(ctx context.Context, p projects.Project, baseline [
 // checkPublishOnly tracks a publish-only project's tags and makes each new
 // stable release on the default branch pending; nothing is deployed.
 func (o *Orchestrator) checkPublishOnly(ctx context.Context, p projects.Project, w *watch) error {
-	if _, err := o.head(ctx, &p, w); err != nil {
+	_, err := o.head(ctx, &p, w)
+	if errors.Is(err, github.ErrEmptyRepository) {
+		_, err = o.trackTags(ctx, &p, w, nil)
+		return err
+	}
+	if err != nil {
 		return err
 	}
 	tags, err := o.tags(ctx, &p, w)

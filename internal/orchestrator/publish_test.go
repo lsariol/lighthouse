@@ -245,6 +245,27 @@ func TestPublishOnly(t *testing.T) {
 	}
 }
 
+// A repository without commits isn't a failed check: nothing is there yet.
+func TestEmptyRepository(t *testing.T) {
+	gh := newGitHub(map[string]string{"ward": "", "site": ""})
+	gh.repos["ward"].empty, gh.repos["site"].empty = true, true
+	o, store, d, _ := setup(t, gh, "site")
+	ctx := context.Background()
+	store.AddPublishOnly(ctx, "ward", github.Repo{Owner: "o", Name: "ward"})
+
+	if err := o.Scan(ctx); err != nil {
+		t.Fatalf("Scan = %v", err)
+	}
+	for _, name := range []string{"ward", "site"} {
+		if p := get(t, store, name); p.LastError != "" {
+			t.Errorf("%s: last error %q", name, p.LastError)
+		}
+	}
+	if p := get(t, store, "ward"); !p.ReleasesTracked || d.count() != 0 {
+		t.Errorf("ward tracked %v; deployed %s", p.ReleasesTracked, d.list())
+	}
+}
+
 func TestLatest(t *testing.T) {
 	published := []github.Release{{Tag: "v1.2.0"}, {Tag: "v2.0.0", Draft: true}, {Tag: "v3.0.0-rc.1", Prerelease: true}, {Tag: "nightly"}}
 	for tag, want := range map[string]bool{"v1.3.0": true, "v1.1.0": false, "v1.2.0": false, "v2.0.0-rc.2": false} {

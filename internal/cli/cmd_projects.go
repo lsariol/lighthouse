@@ -10,8 +10,9 @@ import (
 )
 
 func (c *CLI) list(ctx context.Context, args []string) error {
-	if len(args) != 1 {
-		return usageError{form: "list"}
+	all, rest := takeFlag(args[1:], "--all", "-a")
+	if len(rest) != 0 {
+		return usageError{form: "list [--all]"}
 	}
 
 	projects, err := c.svc.Projects(ctx)
@@ -24,16 +25,16 @@ func (c *CLI) list(ctx context.Context, args []string) error {
 	}
 	slices.SortStableFunc(projects, newestDeployFirst)
 
-	rows := [][]string{{"NAME", "REPOSITORY", "DEPLOYS", "RUNNING", "DEPLOYED", "CHECKED"}}
+	rows := [][]string{{"NAME", "MODE", "VERSION", "DEPLOYED"}}
+	if all {
+		rows[0] = []string{"NAME", "REPOSITORY", "MODE", "VERSION", "DEPLOYED", "CHECKED"}
+	}
 	for _, p := range projects {
-		running, deploys := deployed(p.Version, p.Commit), follows(p.Mode, p.Tier)
-		if p.Stopped {
-			running += ", stopped"
+		row := []string{p.Name, mode(p), version(p), formatTime(p.LastDeployed)}
+		if all {
+			row = []string{p.Name, p.URL, mode(p), version(p), formatTime(p.LastDeployed), formatTime(p.LastChecked)}
 		}
-		if p.Kind == "publish" {
-			running, deploys = published(p), "publish-only"
-		}
-		rows = append(rows, []string{p.Name, p.URL, deploys, running, formatTime(p.LastDeployed), formatTime(p.LastChecked)})
+		rows = append(rows, row)
 	}
 	table(rows)
 	info(fmt.Sprintf("%d %s", len(projects), plural(len(projects), "project", "projects")))
@@ -50,6 +51,35 @@ func (c *CLI) list(ctx context.Context, args []string) error {
 		}
 	}
 	return nil
+}
+
+// mode says what Lighthouse does with p, and its tier if it isn't an app:
+// "tags", "commits, infra", "publish-only".
+func mode(p control.Project) string {
+	if p.Kind == "publish" {
+		return "publish-only"
+	}
+	s := "commits"
+	if p.Mode == "releases" {
+		s = "tags"
+	}
+	if p.Tier != "" && p.Tier != "app" {
+		s += ", " + p.Tier
+	}
+	return s
+}
+
+// version is what p runs or last published: its release, else its commit,
+// or "-"; ", stopped" when stopped on purpose.
+func version(p control.Project) string {
+	v := p.Version
+	if v == "" {
+		v = shortSHA(p.Commit)
+	}
+	if p.Stopped {
+		v += ", stopped"
+	}
+	return v
 }
 
 // newestDeployFirst orders projects by last deploy, newest first, with

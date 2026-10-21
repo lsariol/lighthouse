@@ -266,10 +266,25 @@ func TestListShowsReleasesAndStopped(t *testing.T) {
 	svc.projects[0].Mode, svc.projects[0].Tier, svc.projects[0].Version, svc.projects[0].Commit = "releases", "infra", "v1.2.0", "abcdef123"
 	svc.projects[1].Stopped, svc.projects[1].Commit = true, "1234567aa"
 	out, _, err := run(t, svc, "list")
-	for _, want := range []string{"releases, infra", "v1.2.0 (abcdef1)", "commits", "1234567, stopped"} {
-		if err != nil || !strings.Contains(out, want) {
+	if lines := strings.Split(out, "\n"); err != nil || strings.Join(strings.Fields(lines[0]), " ") != "NAME MODE VERSION DEPLOYED" {
+		t.Errorf("list's columns: %v\n%s", err, out)
+	}
+	for _, want := range []string{"cove  tags, infra  v1.2.0 ", "plop  commits      1234567, stopped"} {
+		if !strings.Contains(out, want) {
 			t.Errorf("list lacks %q:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "github.com") || strings.Contains(out, "abcdef1") {
+		t.Errorf("list shows the repository or a release's commit:\n%s", out)
+	}
+	out, _, err = run(t, svc, "list --all")
+	if lines := strings.Split(out, "\n"); err != nil || strings.Join(strings.Fields(lines[0]), " ") != "NAME REPOSITORY MODE VERSION DEPLOYED CHECKED" ||
+		!strings.Contains(out, "https://github.com/o/cove") {
+		t.Errorf("list --all: %v\n%s", err, out)
+	}
+	var usage usageError
+	if _, _, err := run(t, svc, "list plop"); !errors.As(err, &usage) {
+		t.Errorf("list with an argument = %v, want a usage error", err)
 	}
 
 	svc.status.Projects = svc.projects
@@ -405,11 +420,11 @@ func TestPublishOnlyProjects(t *testing.T) {
 	if !strings.Contains(out, "publish-only") || !strings.Contains(errOut, `"coveclient" publishes releases but has no version tag yet`) {
 		t.Errorf("list:\n%s%s", out, errOut)
 	}
-	if line := strings.Split(out, "\n")[2]; !strings.Contains(line, "coveclient") || !strings.Contains(line, "publish-only  -  ") {
+	if line := strings.Split(out, "\n")[2]; !strings.Contains(line, "coveclient") || !strings.Contains(line, "publish-only  -") {
 		t.Errorf("nothing published yet: %q", line)
 	}
 	svc.projects[1].Version, svc.projects[1].NoRelease = "v1.1.0", false
-	if out, _, _ := run(t, svc, "list"); !strings.Contains(out, "publish-only  v1.1.0, published") {
+	if out, _, _ := run(t, svc, "list"); !strings.Contains(out, "publish-only  v1.1.0") {
 		t.Errorf("list with a published version:\n%s", out)
 	}
 

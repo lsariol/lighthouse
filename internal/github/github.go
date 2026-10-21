@@ -209,6 +209,9 @@ func (c Client) hint(status int, message string) string {
 	return ""
 }
 
+// ErrEmptyRepository means a repository has no commits yet.
+var ErrEmptyRepository = errors.New("the repository has no commits yet")
+
 // LatestCommit returns the newest commit on the repository's default branch.
 func (c Client) LatestCommit(ctx context.Context, repo Repo, token string) (string, error) {
 	sha, _, err := c.CheckCommit(ctx, repo, token, "")
@@ -220,6 +223,10 @@ func (c Client) LatestCommit(ctx context.Context, repo Repo, token string) (stri
 func (c Client) CheckCommit(ctx context.Context, repo Repo, token string, etag string) (string, string, error) {
 	op := "check " + repo.String() + " for its newest commit"
 	resp, err := c.get(ctx, op, c.url(repo, "/commits?per_page=1"), token, "application/vnd.github+json", etag)
+	var gh *Error
+	if errors.As(err, &gh) && gh.Status == http.StatusConflict {
+		return "", "", &Error{Op: op, Status: gh.Status, Err: ErrEmptyRepository}
+	}
 	if err != nil {
 		return "", "", err
 	}
@@ -232,7 +239,7 @@ func (c Client) CheckCommit(ctx context.Context, repo Repo, token string, etag s
 		return "", "", &Error{Op: op, Status: resp.StatusCode, Err: fmt.Errorf("unexpected answer: %v", err)}
 	}
 	if len(commits) == 0 || commits[0].SHA == "" {
-		return "", "", &Error{Op: op, Status: http.StatusNotFound, Err: errors.New("the repository has no commits")}
+		return "", "", &Error{Op: op, Status: http.StatusNotFound, Err: ErrEmptyRepository}
 	}
 	return commits[0].SHA, resp.Header.Get("ETag"), nil
 }
