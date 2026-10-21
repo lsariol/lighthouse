@@ -2,7 +2,7 @@
 
 All notable changes to Lighthouse. Versions follow [semantic versioning](https://semver.org).
 
-## v1.2.1 (unreleased)
+## v1.2.1 (2026-10-20)
 
 ### Changed
 - **`list` and `status` show a publish-only project's newest published version** (`v1.2.0, published`) where a deployed project shows what runs, and when it was published as its last deploy, so a library you just released sorts to the top.
