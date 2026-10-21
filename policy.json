@@ -9,6 +9,14 @@
         "mount:/srv/backups"
       ],
       "reason": "Lighthouse deploys everything: it drives Docker, keeps the deploy folders and backups, and reads the data folders to check symlinks"
+    },
+    {
+      "project": "sonar",
+      "service": "sonar-proxy",
+      "allow": [
+        "mount:/var/run/docker.sock"
+      ],
+      "reason": "Sonar's Docker gateway: answers the agent's two fixed read requests (container list, stats) with secrets stripped. No other Sonar service has the socket."
     }
   ]
 }
