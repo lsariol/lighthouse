@@ -6,7 +6,9 @@ All notable changes to Lighthouse. Versions follow [semantic versioning](https:/
 
 ### Added
 - **Exceptions for one service:** an exception in `policy.json` can name a `service`, and then allows only that service's findings; a project's other services still can't have them (DOCUMENTATION.md §7.1). An exception naming a service the compose file doesn't have is a warning at the `check` step.
-- **The `spark.url` label:** a service reached from outside carries its public address, `spark.url=https://…`, for Sonar and the status page (DOCUMENTATION.md §7). A value that isn't a full `https://` address stops the deploy (`label:spark.url`).
+- **The `com.mobasity.public-url` label:** a service reached from outside carries its public address, `com.mobasity.public-url=https://…`, for Sonar and the status page (DOCUMENTATION.md §7). A value that isn't a full `https://` address stops the deploy (`label:com.mobasity.public-url`).
+- **Every container carries `com.mobasity.version`:** Lighthouse labels each service it starts with the version deployed (or the commit), so Sonar can tell what runs without asking Lighthouse. Compose files don't set it.
+- `policy.json`: Sonar's Docker gateway (`sonar-proxy`) may mount the Docker socket; no other Sonar service may.
 
 ## v1.2.2 (2026-10-20)
 

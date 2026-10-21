@@ -257,9 +257,79 @@ func (r Runner) docker(ctx context.Context, args ...string) error {
 }
 
 // Up starts the project from images already built, replacing its running
-// containers, and removes containers of services it no longer has.
+// containers, and removes containers of services it no longer has. With
+// VersionVar in env, every service gets VersionLabel.
 func (r Runner) Up(ctx context.Context, dir string, project string, env []string, out io.Writer) error {
-	return r.run(ctx, dir, env, out, "-p", project, "up", "-d", "--no-build", "--remove-orphans")
+	args := []string{"-p", project}
+	if version := lookup(env, VersionVar); version != "" {
+		files, err := r.versionLabel(ctx, dir, version)
+		if err != nil {
+			return err
+		}
+		args = append(args, files...)
+	}
+	return r.run(ctx, dir, env, out, append(args, "up", "-d", "--no-build", "--remove-orphans")...)
+}
+
+// VersionVar is the deploy's version in a deploy's environment; VersionLabel
+// carries it on every container, for whatever reads Docker (Sonar).
+const (
+	VersionVar   = "LIGHTHOUSE_DEPLOY_VERSION"
+	VersionLabel = "com.mobasity.version"
+)
+
+// labelsFile is written next to the compose file at each up.
+const labelsFile = ".lighthouse-labels.yaml"
+
+// Compose's own file names, in the order it looks for them.
+var (
+	composeFiles  = []string{"compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"}
+	overrideFiles = []string{"compose.override.yaml", "compose.override.yml", "docker-compose.override.yaml", "docker-compose.override.yml"}
+)
+
+// versionLabel writes labelsFile, giving every service in dir's compose file
+// VersionLabel, and returns the -f arguments that add it to the project's own
+// files (its compose file, and its override file if it has one).
+func (r Runner) versionLabel(ctx context.Context, dir string, version string) ([]string, error) {
+	var args []string
+	for _, names := range [][]string{composeFiles, overrideFiles} {
+		for _, name := range names {
+			if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+				args = append(args, "-f", name)
+				break
+			}
+		}
+	}
+	if len(args) == 0 {
+		return nil, fmt.Errorf("docker compose: no compose file in %s", dir)
+	}
+	out, err := r.output(ctx, dir, append(args, "config", "--services", "--no-interpolate")...)
+	if err != nil {
+		return nil, err
+	}
+	services := map[string]any{}
+	for _, name := range strings.Fields(string(out)) {
+		services[name] = map[string]any{"labels": map[string]string{VersionLabel: version}}
+	}
+	// JSON is YAML, so Compose reads it as an ordinary compose file.
+	data, err := json.Marshal(map[string]any{"services": services})
+	if err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(filepath.Join(dir, labelsFile), data, 0o644); err != nil {
+		return nil, fmt.Errorf("docker compose: write %s: %w", labelsFile, err)
+	}
+	return append(args, "-f", labelsFile), nil
+}
+
+// lookup returns name's value in env, or "".
+func lookup(env []string, name string) string {
+	for i := len(env) - 1; i >= 0; i-- {
+		if k, v, ok := strings.Cut(env[i], "="); ok && k == name {
+			return v
+		}
+	}
+	return ""
 }
 
 // Down stops and removes the project's containers and networks.

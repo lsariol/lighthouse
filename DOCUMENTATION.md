@@ -259,7 +259,7 @@ Deploys run one at a time; a second waits for the first. Each step has a deadlin
 | `secrets` | Every variable **without a default** is fetched from Cove in one batch; one with a default is a setting and isn't fetched (a warning says so) | Serving | Permanent for a missing, forbidden or invalid key; transient for Cove trouble |
 | `build` (20 min) | The running images are tagged `<image>:lh-<commit>` for rollback; `docker compose -p <project> build`; the new images get their `lh-<commit>` tag | Serving | Permanent |
 | `backup` | Fetches the previous version's secrets (for a rollback that doesn't need Cove). With `x-lighthouse` `backup: postgres`, dumps the running database to `BACKUP_PATH` ([§7.2](#72-lighthouse-settings-x-lighthouse)) | Serving | Transient |
-| `swap` (5 min) | `docker compose -p <project> up -d --no-build --remove-orphans`: Compose replaces the containers. **The only downtime** | Replaced | Permanent; rolls back |
+| `swap` (5 min) | `docker compose -p <project> up -d --no-build --remove-orphans`, with every service labelled `com.mobasity.version` ([§7](#7-connecting-a-project-the-contract)): Compose replaces the containers. **The only downtime** | Replaced | Permanent; rolls back |
 | `verify` (2 min) | Every service must be up: healthy if it has a healthcheck; else running, without restarting, for 10 s; a one-off service (no restart policy) may also have exited with 0. Unhealthy, crashed or restarting fails at once | New version | Permanent; rolls back |
 | `cleanup` | Keeps the new folder and the one it replaced; removes other deploy folders, rollback tags of other commits, images nothing uses, and (daily) build cache unused for a week. Never fails a deploy | New version | Only reported |
 
@@ -462,7 +462,9 @@ What a repository needs for Lighthouse to deploy it. `lighthouse help setup` is 
 9. **Unique names on `spark`.** Docker's DNS on a shared network answers every container that has a name: a service called `web` in two projects on `spark` makes `http://web` reach either, at random. A deploy whose service name, `container_name` or alias on `spark` is another project's is refused. Compose adds every service's own name to its networks too, so a service called `web` on `spark` clashes with any other project's `web`.
 10. **Join the external `spark` network** to reach Cove, sparkdb or each other (`sparkdb:5432`, `cove:2100`).
 11. **A `test` stage in the Dockerfile** (optional): `FROM … AS test` is built before every deploy, with no secrets; if it fails, nothing is deployed. Put the project's tests, linters and scanners there.
-12. **A `spark.url` label on each service reached from outside**: its full public address, `labels: [spark.url=https://marquee.mobasity.com]`. Sonar reads it from Docker to check the service is up and to show it on the status page. Only on the service that serves it (internal services have none); a value that isn't a full `https://` address stops the deploy ([§7.1](#71-the-deploy-rules)).
+12. **A `com.mobasity.public-url` label on each service reached from outside**: its full public address, `labels: [com.mobasity.public-url=https://marquee.mobasity.com]`. Sonar reads it from Docker to check the service is up and to show it on the status page. Only on the service that serves it (internal services have none); a value that isn't a full `https://` address stops the deploy ([§7.1](#71-the-deploy-rules)).
+
+**Added by Lighthouse:** every container it starts carries `com.mobasity.version`, the version deployed (a release such as `v1.2.0`, or the commit's first 7 characters), so Sonar or `docker inspect` can tell what runs without asking Lighthouse. A compose file doesn't need to set it. At `docker compose up`, Lighthouse writes `.lighthouse-labels.yaml` next to the compose file, adding the label to each service, and passes it after the project's own compose file (and its `compose.override.yaml`, if it has one).
 
 **Minimal example** (a site with a web service and a worker):
 
@@ -475,7 +477,7 @@ services:
     container_name: website-web           # unique on spark; cloudflared routes to http://website-web:3000
     restart: unless-stopped
     labels:
-      - spark.url=https://website.mobasity.com   # its public address, for Sonar and the status page
+      - com.mobasity.public-url=https://website.mobasity.com   # its public address, for Sonar and the status page
     environment:
       - DATABASE_URL=${WEBSITE_DATABASE_URL}   # secret: fetched from Cove
       - TMDB_API_KEY=${SHARED_TMDB_API_KEY}    # shared secret
@@ -523,7 +525,7 @@ Lighthouse deploys whatever is on `main` with full control of the server's Docke
 | A `${KEY}` that isn't `<COMPOSE PROJECT>_*` (capitals, `-` as `_`) or `SHARED_*` | `secret:BOTSUITE_COVE_TOKEN` |
 | A name on `spark` (service name, `container_name` or alias) that another project's container already answers to: requests for it would reach either | `name:web` |
 | `build:` with `privileged`, `network: host` or `entitlements` | `build:privileged`, `build:network:host` |
-| A `spark.url` label that isn't a full `https://` address with a host (no user or password) | `label:spark.url` |
+| A `com.mobasity.public-url` label that isn't a full `https://` address with a host (no user or password) | `label:com.mobasity.public-url` |
 
 A port published on every interface (`"2400:2400"`) is only a warning: anything on the local network can reach it, around Cloudflare.
 

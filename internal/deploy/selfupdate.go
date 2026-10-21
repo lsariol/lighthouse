@@ -263,7 +263,7 @@ func (d *Deployer) Forget(h HandOff) error {
 // compose file can label what it runs: ${LIGHTHOUSE_DEPLOY_VERSION:-dev}.
 const (
 	DeployCommitVar  = "LIGHTHOUSE_DEPLOY_COMMIT"
-	DeployVersionVar = "LIGHTHOUSE_DEPLOY_VERSION"
+	DeployVersionVar = compose.VersionVar
 )
 
 // deployVars are the deploy's variables: the commit, and the release (or

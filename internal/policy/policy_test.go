@@ -279,14 +279,14 @@ func TestServiceExceptions(t *testing.T) {
 func TestURLLabel(t *testing.T) {
 	s := newSetup(t)
 	for _, good := range []string{"https://marquee.mobasity.com", "https://plop.mobasity.com/", "https://example.org/status?x=1"} {
-		if got := ids(s.check(t, cfg(t, map[string]any{"labels": map[string]string{"spark.url": good}}, nil))); len(got) != 0 {
+		if got := ids(s.check(t, cfg(t, map[string]any{"labels": map[string]string{"com.mobasity.public-url": good}}, nil))); len(got) != 0 {
 			t.Errorf("%q refused: %v", good, got)
 		}
 	}
 	for _, bad := range []string{"", "marquee.mobasity.com", "http://marquee.mobasity.com", "https://", "https://user:pw@host.com", "https://host .com", "ftp://host.com"} {
-		got := ids(s.check(t, cfg(t, map[string]any{"labels": map[string]string{"spark.url": bad}}, nil)))
-		if !slices.Equal(got, []string{"label:spark.url"}) {
-			t.Errorf("%q: findings %v, want label:spark.url", bad, got)
+		got := ids(s.check(t, cfg(t, map[string]any{"labels": map[string]string{"com.mobasity.public-url": bad}}, nil)))
+		if !slices.Equal(got, []string{"label:com.mobasity.public-url"}) {
+			t.Errorf("%q: findings %v, want label:com.mobasity.public-url", bad, got)
 		}
 	}
 	if got := ids(s.check(t, cfg(t, map[string]any{"labels": map[string]string{"com.example.url": "not a url"}}, nil))); len(got) != 0 {

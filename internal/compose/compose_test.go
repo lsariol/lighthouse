@@ -169,11 +169,40 @@ services:
 	if err := r.Exec(ctx, project+"-app-1", []string{"sh", "-c", "echo broken >&2; exit 3"}, &dump); err == nil || !strings.Contains(err.Error(), "broken") {
 		t.Errorf("a failing Exec = %v", err)
 	}
+	if got, _ := exec.Command("docker", "inspect", "--format", `{{index .Config.Labels "com.mobasity.version"}}`, project+"-app-1").Output(); strings.TrimSpace(string(got)) != "" {
+		t.Errorf("a version label without a deploy version: %q", got)
+	}
+
+	// With the deploy's version, every service carries it, its own override file included.
+	os.WriteFile(filepath.Join(dir, "compose.override.yaml"), []byte("services:\n  extra:\n    image: alpine:3.24\n    command: [\"sleep\", \"300\"]\n"), 0o644)
+	if err := r.Up(ctx, dir, project, append(env, VersionVar+"=v1.2.3"), &out); err != nil {
+		t.Fatalf("Up with a version: %v\n%s", err, out.String())
+	}
+	for _, container := range []string{project + "-app-1", project + "-extra-1"} {
+		got, err := exec.Command("docker", "inspect", "--format", `{{index .Config.Labels "com.mobasity.version"}}`, container).Output()
+		if err != nil || strings.TrimSpace(string(got)) != "v1.2.3" {
+			t.Errorf("%s's version label: %q, %v", container, got, err)
+		}
+	}
+	if got, err := exec.Command("docker", "exec", project+"-app-1", "printenv", "SECRET").Output(); err != nil || strings.TrimSpace(string(got)) != "s3cret" {
+		t.Errorf("the secret after the labelled up: %q, %v", got, err)
+	}
+
 	if err := r.Down(ctx, t.TempDir(), project, &out); err != nil {
 		t.Fatalf("Down: %v\n%s", err, out.String())
 	}
 	if ids, _ := exec.Command("docker", "ps", "-aq", "--filter", "label=com.docker.compose.project="+project).Output(); len(strings.TrimSpace(string(ids))) > 0 {
 		t.Error("Down left containers behind")
+	}
+}
+
+func TestLookup(t *testing.T) {
+	env := []string{"A=1", VersionVar + "=v1.0.0", "B=2", VersionVar + "=v2.0.0"}
+	if got := lookup(env, VersionVar); got != "v2.0.0" {
+		t.Errorf("lookup = %q, want the last value", got)
+	}
+	if got := lookup(env, "MISSING"); got != "" {
+		t.Errorf("lookup of a missing name = %q", got)
 	}
 }
 

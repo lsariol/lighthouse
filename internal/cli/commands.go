@@ -482,8 +482,8 @@ deploy (the ID in brackets is what an exception names):
     SHARED_*
   a name on spark another project's        [name:web]
     container already has
-  a spark.url label that isn't a full      [label:spark.url]
-    https:// address
+  a public-address label that isn't a      [label:com.mobasity.public-url]
+    full https:// URL
 
 A port published on every interface is only a warning.
 

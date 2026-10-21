@@ -27,7 +27,7 @@ var readOnlyHostFiles = map[string]bool{"/etc/localtime": true, "/etc/timezone":
 
 // URLLabel is the label on a service that's reached from outside: its public
 // https:// address, for Sonar and the status page.
-const URLLabel = "spark.url"
+const URLLabel = "com.mobasity.public-url"
 
 // publicURL reports whether v is a full https:// URL with a host and no
 // user or password.
