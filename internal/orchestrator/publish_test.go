@@ -173,7 +173,8 @@ func TestPublishingOff(t *testing.T) {
 func TestPublishOnly(t *testing.T) {
 	gh := newGitHub(map[string]string{"coveclient": "h1"})
 	gh.repos["coveclient"].tags = []github.Tag{{Name: "v0.9.0", SHA: "c090"}, {Name: "v1.0.0", SHA: "c100"}}
-	gh.repos["coveclient"].releases = []github.Release{{Tag: "v1.0.0", URL: "https://made/by/hand"}}
+	handMade := time.Date(2026, 10, 2, 9, 30, 0, 0, time.UTC)
+	gh.repos["coveclient"].releases = []github.Release{{Tag: "v1.0.0", URL: "https://made/by/hand", PublishedAt: handMade}}
 	gh.repos["coveclient"].offBranch = map[string]bool{}
 	o, store, d, _ := setup(t, gh)
 	ctx := context.Background()
@@ -186,8 +187,9 @@ func TestPublishOnly(t *testing.T) {
 	// The baseline: nothing is published, an existing Release is adopted.
 	o.Scan(ctx)
 	o.PublishDue(ctx)
-	if r := releaseOf(t, store, "coveclient", "v1.0.0"); r.Status != projects.ReleasePublished || r.URL != "https://made/by/hand" {
-		t.Errorf("an existing Release at the baseline: %+v", r)
+	if r := releaseOf(t, store, "coveclient", "v1.0.0"); r.Status != projects.ReleasePublished || r.URL != "https://made/by/hand" ||
+		r.PublishedAt == nil || !r.PublishedAt.Equal(handMade) {
+		t.Errorf("an existing Release at the baseline (published %v on GitHub): %+v", handMade, r)
 	}
 	if r := releaseOf(t, store, "coveclient", "v0.9.0"); r.Status != projects.ReleaseKnown {
 		t.Errorf("an old tag at the baseline: %+v", r)

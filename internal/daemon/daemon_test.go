@@ -202,6 +202,22 @@ func TestPublishOnlyProject(t *testing.T) {
 		}
 	}
 
+	old, newer := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC), time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	store.TrackReleases(ctx, "coveclient", []projects.Release{
+		{Tag: "v1.1.0", SHA: "c110", Status: projects.ReleasePending},
+		{Tag: "v1.0.1", SHA: "c101", Status: projects.ReleasePending},
+		{Tag: "v1.2.0", SHA: "c120", Status: projects.ReleasePending},
+		{Tag: "v2.0.0-rc.1", SHA: "rc", Status: projects.ReleaseKnown},
+	})
+	store.RecordPublish(ctx, "coveclient", "v1.1.0", projects.Published{Status: projects.ReleasePublished, URL: "u", At: old})
+	store.RecordPublish(ctx, "coveclient", "v1.0.1", projects.Published{Status: projects.ReleasePublished, URL: "u", At: newer})
+	list, _ := d.Projects(ctx)
+	for _, sp := range list {
+		if sp.Name == "coveclient" && (sp.Version != "v1.1.0" || sp.Commit != "c110" || sp.LastDeployed == nil || !sp.LastDeployed.Equal(old) || sp.NoRelease) {
+			t.Errorf("newest published: %+v", sp)
+		}
+	}
+
 	if err := d.Remove(ctx, "coveclient", true); err != nil || len(cmp.downs) != 0 {
 		t.Errorf("remove: %v; compose down %v", err, cmp.downs)
 	}

@@ -214,6 +214,9 @@ func (d *Daemon) Projects(ctx context.Context) ([]control.Project, error) {
 	out := make([]control.Project, 0, len(list))
 	for _, p := range list {
 		cp := toProject(p)
+		if p.PublishOnly() {
+			newestPublished(&cp, byProject[strings.ToLower(p.Name)])
+		}
 		stable := false
 		for _, r := range byProject[strings.ToLower(p.Name)] {
 			switch {
@@ -229,6 +232,20 @@ func (d *Daemon) Projects(ctx context.Context) ([]control.Project, error) {
 		out = append(out, cp)
 	}
 	return out, nil
+}
+
+// newestPublished makes a publish-only project's version its newest
+// published stable release, and its last deploy when that was published.
+func newestPublished(cp *control.Project, rows []projects.Release) {
+	var best release.Version
+	for _, r := range rows {
+		v, ok := release.Parse(r.Tag)
+		if r.Status != projects.ReleasePublished || !ok || cp.Version != "" && !v.Newer(best) {
+			continue
+		}
+		best = v
+		cp.Version, cp.Commit, cp.LastDeployed = r.Tag, r.SHA, r.PublishedAt
+	}
 }
 
 func toRelease(r projects.Release) control.Release {

@@ -95,6 +95,15 @@ func (c *CLI) releaseNotes(ctx context.Context, name string, tag string) error {
 	return nil
 }
 
+// published is a publish-only project's newest published version,
+// "v1.2.0, published", or "-".
+func published(p control.Project) string {
+	if p.Version == "" {
+		return "-"
+	}
+	return p.Version + ", published"
+}
+
 // releaseNote is what the releases table says about r: its Release, the
 // last attempt's error and the next one, or its note.
 func releaseNote(r control.Release) string {

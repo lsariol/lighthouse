@@ -405,6 +405,13 @@ func TestPublishOnlyProjects(t *testing.T) {
 	if !strings.Contains(out, "publish-only") || !strings.Contains(errOut, `"coveclient" publishes releases but has no version tag yet`) {
 		t.Errorf("list:\n%s%s", out, errOut)
 	}
+	if line := strings.Split(out, "\n")[2]; !strings.Contains(line, "coveclient") || !strings.Contains(line, "publish-only  -  ") {
+		t.Errorf("nothing published yet: %q", line)
+	}
+	svc.projects[1].Version, svc.projects[1].NoRelease = "v1.1.0", false
+	if out, _, _ := run(t, svc, "list"); !strings.Contains(out, "publish-only  v1.1.0, published") {
+		t.Errorf("list with a published version:\n%s", out)
+	}
 
 	svc.status.Projects = svc.projects
 	svc.status.Projects[1].NoRelease = false

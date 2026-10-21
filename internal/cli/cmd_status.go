@@ -98,7 +98,11 @@ func (c *CLI) status(ctx context.Context, args []string) error {
 				problems = append(problems, fmt.Sprintf("%q is %s", p.Name, p.State))
 			}
 			problems = append(problems, releaseProblems(p, time.Now())...)
-			rows = append(rows, []string{p.Name, "", state, deployed(p.Version, p.Commit), formatTime(p.LastDeployed), check})
+			running := deployed(p.Version, p.Commit)
+			if p.Kind == "publish" {
+				running = published(p)
+			}
+			rows = append(rows, []string{p.Name, "", state, running, formatTime(p.LastDeployed), check})
 			for _, svc := range p.Services {
 				state := svc.State
 				if svc.Health != "" {

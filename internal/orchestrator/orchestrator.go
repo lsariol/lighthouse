@@ -412,18 +412,19 @@ func (o *Orchestrator) adopt(ctx context.Context, p projects.Project, baseline [
 		slog.Warn("existing GitHub Releases can't be listed; older tags show as known", "project", p.Name, "err", err)
 		return
 	}
-	urls := map[string]string{}
+	byTag := map[string]github.Release{}
 	for _, rel := range existing {
 		if !rel.Draft {
-			urls[rel.Tag] = rel.URL
+			byTag[rel.Tag] = rel
 		}
 	}
 	for i, r := range baseline {
-		url, ok := urls[r.Tag]
+		rel, ok := byTag[r.Tag]
 		if r.Status != projects.ReleaseKnown || !ok {
 			continue
 		}
-		res := projects.Published{Status: projects.ReleasePublished, URL: url, At: o.now(), Note: "its Release already existed, so Lighthouse adopted it"}
+		url := rel.URL
+		res := projects.Published{Status: projects.ReleasePublished, URL: url, At: rel.When(o.now()), Note: "its Release already existed, so Lighthouse adopted it"}
 		if err := o.store.RecordPublish(ctx, p.Name, r.Tag, res); err != nil {
 			slog.Warn("adopting an existing Release failed; it shows as known", "project", p.Name, "tag", r.Tag, "err", err)
 			continue

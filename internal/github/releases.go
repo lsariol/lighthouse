@@ -7,15 +7,25 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // Release is a GitHub Release.
 type Release struct {
-	ID         int64  `json:"id"`
-	Tag        string `json:"tag_name"`
-	URL        string `json:"html_url"`
-	Draft      bool   `json:"draft"`
-	Prerelease bool   `json:"prerelease"`
+	ID          int64     `json:"id"`
+	Tag         string    `json:"tag_name"`
+	URL         string    `json:"html_url"`
+	Draft       bool      `json:"draft"`
+	Prerelease  bool      `json:"prerelease"`
+	PublishedAt time.Time `json:"published_at"`
+}
+
+// When returns when r was published on GitHub, or now if GitHub didn't say.
+func (r Release) When(now time.Time) time.Time {
+	if r.PublishedAt.IsZero() {
+		return now
+	}
+	return r.PublishedAt
 }
 
 // NewRelease is a Release to create for a tag that already exists.

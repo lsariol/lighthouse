@@ -31,7 +31,7 @@ func (c *CLI) list(ctx context.Context, args []string) error {
 			running += ", stopped"
 		}
 		if p.Kind == "publish" {
-			running, deploys = "-", "publish-only"
+			running, deploys = published(p), "publish-only"
 		}
 		rows = append(rows, []string{p.Name, p.URL, deploys, running, formatTime(p.LastDeployed), formatTime(p.LastChecked)})
 	}

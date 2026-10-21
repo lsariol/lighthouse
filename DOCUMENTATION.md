@@ -335,6 +335,8 @@ A failure that may pass (GitHub or Cove unreachable, a rate limit) keeps the rel
 
 **Lighthouse's own Release** is published by the new Lighthouse, after its self-update's result is recorded ([§4.6](#46-self-update)).
 
+**Pre-releases** (`v1.3.0-rc.1`) are recorded as `known` and never deployed or published automatically: there's one environment, production, so a release candidate has nowhere to be tried, and mobasity.com ignores pre-releases. `publish <name> <tag>` can still publish one by hand, as a GitHub pre-release that's never "latest".
+
 **Setting it up (once):**
 
 1. On GitHub, **create a GitHub App** you own (Settings → Developer settings → GitHub Apps → New): any name; homepage URL `https://github.com/<you>`; **no webhook** (untick Active); repository permissions **Contents: Read and write** (Metadata: Read-only comes with it), nothing else; "Only on this account".
@@ -349,8 +351,8 @@ A failure that may pass (GitHub or Cove unreachable, a rate limit) keeps the rel
 
 Some repositories get versions but aren't deployed: Go libraries (CoveClient, Ward), a browser extension (Crossframe). `add <url> --publish-only` watches one only to publish its GitHub Releases ([§4.7](#47-releases)).
 
-- **No compose file, no deploy, no containers.** Lighthouse never reads its compose file (it may have none) and never deploys it; the reconcile loop leaves it alone; `deploy`, `rollback`, `retry`, `check` and the container commands refuse it, and `all` skips it. `list` says `publish-only`, and so does `status`, which doesn't count it as missing.
-- **The baseline:** at its first check every existing tag is `known`, whatever its version, and a tag that already has a GitHub Release is recorded as `published` (adopted). Nothing old is published; `publish` backfills one by hand.
+- **No compose file, no deploy, no containers.** Lighthouse never reads its compose file (it may have none) and never deploys it; the reconcile loop leaves it alone; `deploy`, `rollback`, `retry`, `check` and the container commands refuse it, and `all` skips it. `list` and `status` say `publish-only` and show its newest published stable version (`v1.2.0, published`) where a deployed project shows what runs, with when that Release was published as its last deploy; `status` doesn't count it as missing.
+- **The baseline:** at its first check every existing tag is `known`, whatever its version, and a tag that already has a GitHub Release is recorded as `published` (adopted, with the date GitHub published it). Nothing old is published; `publish` backfills one by hand.
 - **Each new stable tag on `main` is published:** it goes straight from `ready` to `pending`, without a deploy. Unlike a deployed project, an older version line counts too (`v1.0.1` after `v1.1.0` is published, without taking "latest"). A tag not on `main` waits, as for any project; pre-releases stay `known`.
 - **Its Releases mean "I published this version"**, not "Lighthouse verified it running".
 - The kind is set when the project is added and can't be changed: `remove` it and `add` it again (its tags are then recorded as a new baseline).
@@ -554,7 +556,7 @@ services:
 
 | Setting | Values | What it does |
 |---|---|---|
-| `deploy` | `branch` (default), `releases` | `releases`: only tags that are plain versions deploy (pre-releases such as `v1.1.0-rc.1` and other tags don't); a newer one than **any release deployed before** deploys automatically, so going back by hand (`deploy <name> v1.0.0`) sticks until a newer release is tagged. Pushing to the branch does nothing. Your release flow (tag, then push `main`) deploys at the tag |
+| `deploy` | `branch` (default), `releases` | `releases`: only tags that are plain versions deploy (pre-releases such as `v1.1.0-rc.1` and other tags don't); a newer one than **any release deployed before** deploys automatically, so going back by hand (`deploy <name> v1.0.0`) sticks until a newer release is tagged. Pushing to the branch does nothing. The release flow (push `main`, then the tag) deploys at the tag; a tag pushed before `main` waits until `main` contains it ([§4.7](#47-releases)) |
 | `tier` | `app` (default), `infra`, `data` | The order deploys and the reconcile loop go in: `data` (sparkdb) first, then `infra` (Cove, cloudflared), then apps. One deploy runs at a time, so an infrastructure deploy has the server to itself until it's healthy |
 | `backup` | `postgres` | Before the swap, `pg_dumpall` runs in the project's postgres service (the one whose image is `postgres…`) and is saved gzipped to `/srv/backups/<compose project>/` (mode 0600; the newest 5 are kept). If the backup fails, the deploy stops and nothing changes. On a first deploy, or when the database isn't running, there's nothing to back up |
 
@@ -616,7 +618,7 @@ Lighthouse's CLI follows the server's CLI conventions (clig.dev; modelled on Cov
 
 | Command | Usage | Notes |
 |---|---|---|
-| `list`, `ls`, `l` | `list` | Every project, newest deploy first (never deployed last): repository, what it deploys (commits or releases, and its tier, or `publish-only`), what runs (version and commit, or stopped), last deploy, last check; its last error, whether it's broken, tags waiting for `main` or moved, and no release yet |
+| `list`, `ls`, `l` | `list` | Every project, newest deploy first (never deployed last): repository, what it deploys (commits or releases, and its tier, or `publish-only`), what runs (version and commit, or stopped; for a publish-only project its newest published version), last deploy (or that version's publication), last check; its last error, whether it's broken, tags waiting for `main` or moved, and no release yet |
 | `releases` | `releases <name> [tag]` | A project's version tags, newest first: commit, status ([§4.7](#47-releases)), since when, and its Release, the last error and next attempt, or why. With a tag: the GitHub Release text it will get, and a warning when its CHANGELOG section or date is missing |
 | `publish` | `publish <name> <tag> [--date YYYY-MM-DD] [--notes-from <ref>] [--yes]` | Asks first. Publish an existing tag's GitHub Release now, without deploying it (a backfill, marked as not verified by a deploy); never takes "latest" from a newer version. A failed attempt is tried again later |
 | `add` | `add <url> [--name <name>] [--publish-only]` | Named after the repository (lowercase). `--name` only when that name is taken; on a terminal `add` asks instead. Names: letters, digits, `-`, `_`, up to 64. The URL may have `www.`, a trailing `/` or `.git`. Deployed on the next check; with `--publish-only`, never deployed, only its Releases published ([§4.8](#48-publish-only-projects)) |

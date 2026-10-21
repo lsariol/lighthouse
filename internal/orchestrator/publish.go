@@ -137,7 +137,7 @@ func (o *Orchestrator) tryPublish(ctx context.Context, p projects.Project, r pro
 		return again(err)
 	}
 	if found {
-		return projects.Published{Status: projects.ReleasePublished, URL: existing.URL, At: now, Note: "its Release already existed, so Lighthouse adopted it"}
+		return projects.Published{Status: projects.ReleasePublished, URL: existing.URL, At: existing.When(now), Note: "its Release already existed, so Lighthouse adopted it"}
 	}
 
 	body, warnings, err := o.notes(ctx, p, r, now)
@@ -163,7 +163,7 @@ func (o *Orchestrator) tryPublish(ctx context.Context, p projects.Project, r pro
 	if r.Backfill {
 		notes = append(notes, "published with `publish`, not verified by a deploy")
 	}
-	return projects.Published{Status: projects.ReleasePublished, URL: created.URL, At: now, Note: strings.Join(append(notes, warnings...), "; ")}
+	return projects.Published{Status: projects.ReleasePublished, URL: created.URL, At: created.When(now), Note: strings.Join(append(notes, warnings...), "; ")}
 }
 
 // notes is r's Release text: its CHANGELOG.md section at its commit (or its
