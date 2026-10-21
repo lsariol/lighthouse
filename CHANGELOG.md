@@ -5,8 +5,8 @@ All notable changes to Lighthouse. Versions follow [semantic versioning](https:/
 ## v1.3.0 (2026-10-21)
 
 ### Added
-- **Exceptions for one service:** an exception in `policy.json` can name a `service`, and then allows only that service's findings; a project's other services still can't have them (DOCUMENTATION.md §7.1). An exception naming a service the compose file doesn't have is a warning at the `check` step.
-- **The `com.mobasity.public-url` label:** a service reached from outside carries its public address, `com.mobasity.public-url=https://…`, for Sonar and the status page (DOCUMENTATION.md §7). A value that isn't a full `https://` address stops the deploy (`label:com.mobasity.public-url`).
+- **Exceptions for one service:** an exception in `policy.json` can name a `service`, and then allows only that service's findings; a project's other services still can't have them. An exception naming a service the compose file doesn't have is a warning at the `check` step.
+- **The `com.mobasity.public-url` label:** a service reached from outside carries its public address, `com.mobasity.public-url=https://…`, for Sonar and the status page. A value that isn't a full `https://` address stops the deploy (`label:com.mobasity.public-url`).
 - **Every container carries `com.mobasity.version`:** Lighthouse labels each service it starts with the version deployed (or the commit), so Sonar can tell what runs without asking Lighthouse. Compose files don't set it.
 - `policy.json`: Sonar's Docker gateway (`sonar-proxy`) may mount the Docker socket; no other Sonar service may.
 
@@ -29,18 +29,18 @@ All notable changes to Lighthouse. Versions follow [semantic versioning](https:/
 Lighthouse publishes Releases for repositories it doesn't deploy, such as Go libraries.
 
 ### Added
-- **Publish-only projects:** `add <url> --publish-only` (DOCUMENTATION.md §4.8). Each new stable version tag on `main` gets a GitHub Release, with no compose file, deploy or containers. `deploy`, `rollback`, `retry`, `check` and the container commands refuse such a project, `all` skips it, and `status` doesn't count it as missing.
+- **Publish-only projects:** `add <url> --publish-only`. Each new stable version tag on `main` gets a GitHub Release, with no compose file, deploy or containers. `deploy`, `rollback`, `retry`, `check` and the container commands refuse such a project, `all` skips it, and `status` doesn't count it as missing.
 - **Existing Releases are adopted at the baseline:** when Lighthouse first records a project's tags, one that already has a GitHub Release shows as `published` in `releases`.
 
 ### Changed
-- DOCUMENTATION.md §4.7: the GitHub App's key goes into Cove in base64, since Cove's `create` takes one line.
+- The setup steps store the GitHub App's key in Cove in base64, since Cove's `create` takes one line.
 
 ## v1.1.0 (2026-10-20)
 
 Lighthouse publishes a GitHub Release for each version it deploys and verifies, through a GitHub App you own.
 
 ### Added
-- **Release tracking** for projects that deploy releases (DOCUMENTATION.md §4.7). Each version tag gets a status: `known`, `waiting`, `ready`, `pending`, `published`, `failed`, `superseded` or `moved`. The tags already there at the first check are recorded as `known` and never published automatically.
+- **Release tracking** for projects that deploy releases. Each version tag gets a status: `known`, `waiting`, `ready`, `pending`, `published`, `failed`, `superseded` or `moved`. The tags already there at the first check are recorded as `known` and never published automatically.
 - **Publishing GitHub Releases.** Once a release deploys and passes its checks (from a check, a `retry`, or Lighthouse's own update), its Release is published with its dated `CHANGELOG.md` section, and becomes "latest" only if it's the highest stable version. A Release that already exists is adopted; a moved or deleted tag is never published. Failures are retried with a backoff, kept across restarts, and shown by `status`. Needs a GitHub App (`GITHUB_APP_ID`, its key `LIGHTHOUSE_GITHUB_APP_SECRET` in Cove); without one, publishing is off and Releases wait.
 - **`publish <name> <tag>`** publishes an existing tag's Release without deploying it, for versions from before publishing (`--date`, `--notes-from`). Marked as not verified by a deploy.
 - **`releases <name> [tag]`** lists a project's tags and their status, or shows the GitHub Release text a tag will get: its `CHANGELOG.md` section under a dated heading, with a warning when the section or the date is missing.
@@ -50,10 +50,10 @@ Lighthouse publishes a GitHub Release for each version it deploys and verifies, 
 - **A release deploys only once its commit is on the default branch.** A tag pushed before `main` waits, and deploys on the first check after `main` contains it.
 - Version tags are compared as SemVer, pre-releases included; pre-releases are still never deployed automatically.
 - `retry` is recorded with its own trigger, `retry`, instead of `manual`: a release it deploys counts as deployed by a check.
-- **Tests run in the Dockerfile's `test` stage instead of GitHub Actions.** Every deploy of Lighthouse runs gofmt, vet and the tests with `-race` first, and a failure stops the deploy. The database tests, `govulncheck` and the checks that need Docker run locally (DOCUMENTATION.md §13.1).
+- **Tests run in the Dockerfile's `test` stage instead of GitHub Actions.** Every deploy of Lighthouse runs gofmt, vet and the tests with `-race` first, and a failure stops the deploy. The database tests, `govulncheck` and the checks that need Docker run locally.
 
 ### Upgrading
-- To publish, create the GitHub App and set it up as DOCUMENTATION.md §4.7 describes (the key in Cove, `GITHUB_APP_ID` in `docker-compose.yml`). Until then Lighthouse runs as before, and the releases it deploys wait to be published.
+- To publish, create a GitHub App with Contents read and write, install it on the repositories to publish, store its key in Cove as `LIGHTHOUSE_GITHUB_APP_SECRET`, and set `GITHUB_APP_ID` in `docker-compose.yml`. Until then Lighthouse runs as before, and the releases it deploys wait to be published.
 
 ## v1.0.3 (2026-10-20)
 
@@ -66,7 +66,7 @@ Lighthouse publishes a GitHub Release for each version it deploys and verifies, 
 - **A project's settings come only from its default branch.** Deploying an older tag whose compose file predates its `x-lighthouse` block flipped the project back to deploying its branch, which then redeployed it. `deploy` and `check` also read the branch's settings first, so a release-mode project that hasn't been checked yet deploys its newest release.
 
 ### Removed
-- `lighthouse import` and its `repos.json` reader: the move from pre-1.0 is done (v1.0.1's DOCUMENTATION.md §10 has the steps).
+- `lighthouse import` and its `repos.json` reader: the move from pre-1.0 is done.
 
 ### Changed
 - Comments trimmed throughout: none inside functions unless they prevent a mistake, one-line descriptions. No behaviour change.
@@ -81,7 +81,7 @@ Lighthouse publishes a GitHub Release for each version it deploys and verifies, 
 
 ## v1.0.0 (2026-10-07)
 
-A rewrite of the pre-1.0 Lighthouse into a self-sufficient deployer: safe deploys that roll back, rules a project can't break out of, release-tag projects, infrastructure ordering and backups, recovery of projects that go down, and updates of itself. Moving from pre-1.0: DOCUMENTATION.md §10, "Upgrading from the pre-1.0 Lighthouse".
+A rewrite of the pre-1.0 Lighthouse into a self-sufficient deployer: safe deploys that roll back, rules a project can't break out of, release-tag projects, infrastructure ordering and backups, recovery of projects that go down, and updates of itself.
 
 ### Added
 - **Safe deploys.** Build first, swap last: the running version keeps serving while the new one is downloaded (the exact commit, through the GitHub API, so private repositories work), checked, tested and built; `docker compose up` is the only downtime; every service must then come up healthy (or stay up), and if one doesn't, the previous version is put back. Each deploy cleans up after itself.
