@@ -6,7 +6,7 @@ The reference for **Lighthouse**, the self-hosted deployer behind every project 
 - [Cove](https://github.com/LSariol/Cove): the secret vault Lighthouse reads from. Its `DOCUMENTATION.md` §9 (connecting a project), §10 (bootstrap) and §14 (operations) are the other half of this document.
 - [CoveClient](https://github.com/LSariol/CoveClient): the Go library Lighthouse uses to talk to Cove.
 
-This document describes v1.0.0. Sections 1–13 are how Lighthouse works, section 14 the standards every change follows, section 15 its known limits and accepted risks, section 16 what may come later. The history of how it got here is in git and `CHANGELOG.md`.
+This document describes the latest release (`CHANGELOG.md` lists each version). Sections 1–13 are how Lighthouse works, section 14 the standards every change follows, section 15 its known limits and accepted risks, section 16 what may come later. The history of how it got here is in git and `CHANGELOG.md`.
 
 ---
 
@@ -33,7 +33,7 @@ This document describes v1.0.0. Sections 1–13 are how Lighthouse works, sectio
 
 ## 1. Overview
 
-Lighthouse keeps the server's projects running the latest code on their default branch. It is one Go program running in a Docker container next to the projects it manages.
+Lighthouse keeps the server's projects running their latest release (or, for a project not moved to tags yet, the latest commit on its default branch), and publishes each release's GitHub Release. It is one Go program running in a Docker container next to the projects it manages.
 
 Every 10 seconds (configurable) it asks GitHub for the newest commit of each watched repository (or, for a project that deploys releases, its newest version tag). When it changes, it deploys it, **building first and swapping last**:
 
@@ -61,7 +61,7 @@ The project reads plain environment variables: it needs no Cove code, address or
        │      └─────► sparkdb (lighthouse_db): projects, deploy history
        │ /var/run/docker.sock
        ▼
-   Host Docker daemon ──► botsuite, marquee, plop, website, cove, ...  (compose projects)
+   Host Docker daemon ──► lys, marquee, plop, mobasity-web, cove, ...  (compose projects)
                           on the external `spark` network; public traffic via cloudflared
 ```
 
@@ -95,6 +95,8 @@ On the server. `lh` below stands for `docker exec -it lighthouse /lighthouse`; a
 | Why did a deploy fail? | `lh report <name>` (each step with its output) |
 | A broken project, after fixing it outside the repo | `lh retry <name>` |
 | Check for new commits now | `lh scan` |
+| A project's version tags and their Releases | `lh releases <name>`; one tag's Release text: `lh releases <name> <tag>` |
+| Publish an old version's Release | `lh publish <name> <tag>` (asks first) |
 | Freeze all automatic work | `lh pause` / `lh resume` (or `pause all` / `resume all`) |
 | A project's output | `lh logs <name>` (every service) or `lh logs <name>:<service> [lines]` |
 | One service | `lh restart <name>:<service>` (also `start`, `stop`) |
@@ -449,7 +451,7 @@ What a repository needs for Lighthouse to deploy it. `lighthouse help setup` is 
 **Required**
 
 1. **A compose file at the repository's top** (`compose.yaml`, `compose.yml`, `docker-compose.yaml` or `docker-compose.yml`). Lighthouse runs **every service** in it.
-2. **The deployable code on the default branch** (usually `main`). Lighthouse deploys its newest commit. Private repositories work, as long as Lighthouse's GitHub token can read them.
+2. **The deployable code on the default branch** (usually `main`). With `x-lighthouse: {deploy: releases}`, the standard, Lighthouse deploys each new version tag once its commit is on that branch; without it, every commit on the branch ([§7.2](#72-lighthouse-settings-x-lighthouse)). Private repositories work, as long as Lighthouse's GitHub token can read them.
 3. **Every `${KEY}` without a default exists in Cove** under exactly that name, following the naming standard `PROJECT_PLATFORM[_ROLE]_TYPE` ([§14.2](#142-secrets-cove)), where `PROJECT` is the compose project in capitals, or `SHARED` ([§7.1](#71-the-deploy-rules)). Plain settings are written as values, never `${...}`.
 4. **Persistent data in the compose project's folder** (`/srv/server/storage/<compose project>/...:/app/data`) or a named volume. Nothing else on the host ([§7.1](#71-the-deploy-rules)).
 5. **Nothing the deploy rules refuse** ([§7.1](#71-the-deploy-rules)), unless `policy.json` has an exception. A relative bind mount (`./config.yml:/app/config.yml`) works for files **in the repository**, since each version's folder is kept while it runs, but anything written there is gone with the next version.
@@ -462,7 +464,7 @@ What a repository needs for Lighthouse to deploy it. `lighthouse help setup` is 
 9. **Unique names on `spark`.** Docker's DNS on a shared network answers every container that has a name: a service called `web` in two projects on `spark` makes `http://web` reach either, at random. A deploy whose service name, `container_name` or alias on `spark` is another project's is refused. Compose adds every service's own name to its networks too, so a service called `web` on `spark` clashes with any other project's `web`.
 10. **Join the external `spark` network** to reach Cove, sparkdb or each other (`sparkdb:5432`, `cove:2100`).
 11. **A `test` stage in the Dockerfile** (optional): `FROM … AS test` is built before every deploy, with no secrets; if it fails, nothing is deployed. Put the project's tests, linters and scanners there.
-12. **A `com.mobasity.public-url` label on each service reached from outside**: its full public address, `labels: [com.mobasity.public-url=https://marquee.mobasity.com]`. Sonar reads it from Docker to check the service is up and to show it on the status page. Only on the service that serves it (internal services have none); a value that isn't a full `https://` address stops the deploy ([§7.1](#71-the-deploy-rules)).
+12. **A `com.mobasity.public-url` label on each service reached from outside**: its full public address, written as a map: `labels: {com.mobasity.public-url: https://marquee.mobasity.com}`. Sonar reads it from Docker to check the service is up and to show it on the status page. Only on the service that serves it (internal services have none); a value that isn't a full `https://` address stops the deploy ([§7.1](#71-the-deploy-rules)).
 
 **Added by Lighthouse:** every container it starts carries `com.mobasity.version`, the version deployed (a release such as `v1.2.0`, or the commit's first 7 characters), so Sonar or `docker inspect` can tell what runs without asking Lighthouse. A compose file doesn't need to set it. At `docker compose up`, Lighthouse writes `.lighthouse-labels.yaml` next to the compose file, adding the label to each service, and passes it after the project's own compose file (and its `compose.override.yaml`, if it has one).
 
@@ -470,6 +472,8 @@ What a repository needs for Lighthouse to deploy it. `lighthouse help setup` is 
 
 ```yaml
 name: website
+x-lighthouse:
+  deploy: releases                      # deploy version tags, not every commit (§7.2)
 
 services:
   web:
@@ -477,7 +481,7 @@ services:
     container_name: website-web           # unique on spark; cloudflared routes to http://website-web:3000
     restart: unless-stopped
     labels:
-      - com.mobasity.public-url=https://website.mobasity.com   # its public address, for Sonar and the status page
+      com.mobasity.public-url: https://website.mobasity.com   # its public address, for Sonar and the status page
     environment:
       - DATABASE_URL=${WEBSITE_DATABASE_URL}   # secret: fetched from Cove
       - TMDB_API_KEY=${SHARED_TMDB_API_KEY}    # shared secret
@@ -503,7 +507,7 @@ networks:
 
 Added as `add https://github.com/lsariol/landing`, it's `landing` in the CLI, `website` to Compose (so its keys are `WEBSITE_*` and its data is in `/srv/server/storage/website/`), and `logs landing:bot` shows the bot.
 
-**A project that writes to Cove** (today only botsuite) also gets `COVE_URL=http://cove:2100` and `COVE_TOKEN=${<PROJECT>_COVE_TOKEN}` and uses CoveClient v1. See Cove's `DOCUMENTATION.md` §9.
+**A project that writes to Cove** (today only Lys) also gets `COVE_URL=http://cove:2100` and `COVE_TOKEN=${<PROJECT>_COVE_TOKEN}` and uses CoveClient v1. See Cove's `DOCUMENTATION.md` §9.
 
 **Cove and sparkdb** are deployed by Lighthouse too, as infrastructure ([§7.2](#72-lighthouse-settings-x-lighthouse)): their secrets are fetched before anything is touched, and they keep running until their new version is built.
 
@@ -586,7 +590,7 @@ The settings are read from the default branch's compose file whenever the branch
 | Key it reads to publish | `LIGHTHOUSE_GITHUB_APP_SECRET`: the GitHub App's private key, read when publishing first needs it and kept in memory (read again if GitHub rejects it). Missing: Releases stay pending, and `status` says why ([§4.7](#47-releases)) |
 | Keys it reads for projects | Every `${KEY}` without a default in each project's compose file, as one `GetSecrets` batch per deploy (and one more for a rollback) |
 | Audit | Every read shows as `lighthouse` in Cove's `history <KEY>` |
-| Database keys | One connection string per role that logs in, nothing else: `LIGHTHOUSE_DATABASE_URL` (app), `LIGHTHOUSE_MIGRATOR_DATABASE_URL`, `LIGHTHOUSE_READER_DATABASE_URL` (for pgAdmin). The server's convention is `<PROJECT>_<ROLE>_DATABASE_URL`, the app's without a role. No separate password keys ([§10.1](#101-database-setup-once-by-hand)) |
+| Database keys | One connection string per role that logs in, nothing else: `LIGHTHOUSE_DATABASE_URL` (app), `LIGHTHOUSE_MIGRATOR_DATABASE_URL`, `LIGHTHOUSE_READER_DATABASE_URL` (for pgAdmin). No separate password keys ([§10.1](#101-database-setup-once-by-hand)) |
 
 **First start (bootstrap):**
 
@@ -676,13 +680,13 @@ docker network inspect spark >/dev/null 2>&1 || docker network create spark
 # The database and its URL keys: §10.1.
 
 git clone https://github.com/lsariol/lighthouse.git && cd lighthouse
-git checkout v1.0.0
-LIGHTHOUSE_DEPLOY_VERSION=v1.0.0 docker compose up -d --build   # the version status shows; self-updates set it themselves
+git checkout v1.3.1                                               # the newest release
+LIGHTHOUSE_DEPLOY_VERSION=v1.3.1 docker compose up -d --build   # the version status shows; self-updates set it themselves
 docker logs -f lighthouse     # success: "migration applied" (first start only), then "Lighthouse ready"
 docker exec lighthouse /lighthouse status   # success: exit status 0 (otherwise: "Needs attention: ...")
 ```
 
-**Updating:** tag a release (`v1.0.1`) and push the tag; Lighthouse deploys it on its next check, through the update helper. By hand, if ever needed (Lighthouse stopped, or not yet watching itself):
+**Updating:** release as usual (push `main`, then the `vX.Y.Z` tag); Lighthouse deploys the tag on its next check, through the update helper. By hand, if ever needed (Lighthouse stopped, or not yet watching itself):
 
 ```bash
 cd ~/lighthouse && git pull && docker compose up -d --build
@@ -810,7 +814,7 @@ A new password is generated straight into its URL on the server, and `setup.sql`
 1. **Nothing went down.** The running version kept serving while the new one was prepared; if the new one started but didn't come up healthy, the old one was put back (`rolled back` in `lh history`).
 2. **See why:** `lh report <name>` shows each step of the last deploy with its output. The error is also on `lh list` and `lh status`.
 3. **What happens next:** a transient failure (GitHub, Cove, the network) is tried again at the next check. A permanent one (the commit itself) is tried again too, but after 3 failures of the same commit the project is **broken** and waits.
-4. **Fix it:** push a fix (a new commit is always tried), or, for a fix outside the repository such as a missing secret in Cove, `lh retry <name>`.
+4. **Fix it:** release a fix (a new version tag is always tried; for a project that deploys its branch, a new commit), or, for a fix outside the repository such as a missing secret in Cove, `lh retry <name>`.
 
 ### Going back
 
@@ -995,8 +999,8 @@ These rules apply to every change, on every project on the server. They come fro
 
 ### 14.3 Git and releases
 
-- Prod is only updated from `main`. Changes land on short-lived branches, merged into `release/<version>`.
-- **Release:** update `CHANGELOG.md`, fast-forward merge `release/<version>` into `main`, tag `vX.Y.Z`, push the tag, then push `main`. Lighthouse deploys its own tag ([§4.6](#46-self-update)); a project that deploys its branch deploys on the push to `main`, one that deploys releases on the tag.
+- Prod is only updated from `main` and tags. Changes land on short-lived branches, merged into `release/<version>`. Commit messages follow Conventional Commits; a release is `chore(release): vX.Y.Z`.
+- **Release:** update `CHANGELOG.md` (a dated `## vX.Y.Z (YYYY-MM-DD)` section), fast-forward merge `release/<version>` into `main`, push `main`, then tag `vX.Y.Z` and push the tag, so the tag is already on `main` when Lighthouse sees it. Never move or delete a pushed tag; fix forward. Lighthouse deploys its own tag ([§4.6](#46-self-update)); a project that deploys its branch deploys on the push to `main`, one that deploys releases on the tag.
 - Semantic versioning.
 
 ### 14.4 Prod changes
@@ -1027,7 +1031,7 @@ Every change that prod needs (a new host folder, a Cove key, Admin SQL, a compos
 
 ## 16. Future features
 
-Not in v1.0.0; each gets designed when it's picked up.
+Not built yet; each gets designed when it's picked up.
 
 1. **Notifications.** The draft (2026-10-07): a small program of its own on the Windows PC, started at login, with one inbound API (`POST /v1/notify`: title, message, level, source; a bearer token) that shows a Windows notification, for Lighthouse and any other project. Lighthouse would notify on a failed, rolled-back or broken deploy, Cove or GitHub unreachable, a project brought back, a self-update, and the GitHub token close to expiring. Open: its own repository and name; a fixed address for the PC; when the PC is off, retry and drop (recommended; `history` keeps everything) or catch up on wake. With it could come crash-loop and unhealthy alerts from Docker.
 2. **An infrastructure review and an agent-ready reference:** the server, `spark`, sparkdb, Cove, cloudflared and Lighthouse documented together; a fully commented example `docker-compose.yml`; and an "infrastructure dependencies" file, every rule one line linking to its full section, to give an agent (or a person) making a project compliant.

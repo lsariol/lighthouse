@@ -2,20 +2,21 @@
 
 **Push to GitHub, and your home server updates itself.**
 
-Lighthouse keeps the projects on a personal server up to date. It watches your GitHub repositories, and when new code lands on `main`, it downloads it, builds it with Docker, hands it the passwords and API keys it needs, and starts it. You don't SSH in to run `git pull`, and there's no cloud CI service to pay for or trust.
+Lighthouse keeps the projects on a personal server up to date. It watches your GitHub repositories, and when you tag a new release (or, if you prefer, push to `main`), it downloads it, builds it with Docker, hands it the passwords and API keys it needs, and starts it. You don't SSH in to run `git pull`, and there's no cloud CI service to pay for or trust.
 
 It's built for one person running their own projects on their own hardware: a homelab, a spare PC, a small Debian box behind a Cloudflare tunnel.
 
-> **Status:** v1.0.0, in daily use. [DOCUMENTATION.md](DOCUMENTATION.md) has the details, and what may come later.
+> **Status:** in daily use; `CHANGELOG.md` lists each version. [DOCUMENTATION.md](DOCUMENTATION.md) has the details, and what may come later.
 
 ---
 
 ## What it does
 
-- **Watches your repos.** Every few seconds it checks whether `main` has a new commit.
+- **Watches your repos.** Every few seconds it checks for a new version tag, or a new commit on `main`.
 - **Deploys safely.** New commit → download → build → swap. Your old version keeps running while the new one builds, and if the new one doesn't come up healthy, the old one is put back. A commit that keeps failing is set aside until you push a fix.
 - **Follows a branch or your releases.** By default every commit on `main` deploys. A project can instead deploy only version tags (`v1.2.3`), set in its own compose file, and infrastructure (the database, the vault) deploys first, alone, after a database backup.
 - **Brings things back.** If a project's containers disappear, Lighthouse redeploys what was running.
+- **Publishes your releases.** Once a version is deployed and healthy, Lighthouse publishes its GitHub Release, with that version's notes from `CHANGELOG.md`. Libraries that aren't deployed can get their Releases published too.
 - **Updates itself.** Tag a Lighthouse release and it deploys it like any project, through a short-lived helper container that puts the old version back if the new one isn't healthy.
 - **Goes back when you ask.** `rollback <name>` returns to what ran before, and it stays there until something newer comes along.
 - **Checks before it deploys.** A compose file that would reach outside its project (root on the host, another project's files or secrets, the Docker socket) is refused before anything is built, and a Dockerfile `test` stage runs first if there is one. Exceptions are written down in `policy.json`.
@@ -76,7 +77,7 @@ Then tell Lighthouse about it:
 add https://github.com/you/myapp
 ```
 
-That's it: it's named after the repository, and the next push to `main` deploys it. To deploy only release tags (`v1.2.3`) instead, add `x-lighthouse: {deploy: releases}` to the compose file. A healthcheck on your services lets Lighthouse tell whether a new version really works before it keeps it. The full list of rules (naming, storage folders, a few gotchas) is in [DOCUMENTATION.md §7](DOCUMENTATION.md#7-connecting-a-project-the-contract).
+That's it: it's named after the repository, and the next push to `main` deploys it. To deploy only release tags (`v1.2.3`) instead, which is what Lighthouse's own projects do, add `x-lighthouse: {deploy: releases}` to the compose file. A healthcheck on your services lets Lighthouse tell whether a new version really works before it keeps it. The full list of rules (naming, storage folders, a few gotchas) is in [DOCUMENTATION.md §7](DOCUMENTATION.md#7-connecting-a-project-the-contract).
 
 ---
 
@@ -94,7 +95,8 @@ You'll need a Linux server with Docker and Docker Compose, a Postgres server for
    ```bash
    git clone https://github.com/lsariol/lighthouse.git
    cd lighthouse
-   LIGHTHOUSE_DEPLOY_VERSION=v1.0.0 docker compose up -d --build
+   git checkout v1.3.1      # the newest release
+   LIGHTHOUSE_DEPLOY_VERSION=v1.3.1 docker compose up -d --build
    ```
 3. **Open the control prompt** and add your first project:
    ```bash
@@ -117,6 +119,7 @@ On its first start Lighthouse picks up its Cove access automatically. After that
 | `check <name>` | Would its latest commit deploy? (changes nothing) |
 | `logs <name>` | Show a project's recent output |
 | `history <name>` | How its recent deploys went |
+| `releases <name>` | Its version tags, and whether each one's GitHub Release is published |
 | `pause` / `resume` | Hold all deploys / carry on |
 | `help` | Everything else, with examples (`help setup` walks through preparing a repo; `help rules` lists what a deploy refuses) |
 
@@ -124,7 +127,7 @@ On its first start Lighthouse picks up its Cove access automatically. After that
 
 ## Learn more
 
-- **[DOCUMENTATION.md](DOCUMENTATION.md)**: how everything works, configuration, troubleshooting, security, known issues and the v1.0.0 roadmap.
+- **[DOCUMENTATION.md](DOCUMENTATION.md)**: how everything works, configuration, troubleshooting, security, known issues and what may come later.
 - **[Cove](https://github.com/LSariol/Cove)**: the secret vault Lighthouse gets its secrets from.
 - **[CoveClient](https://github.com/LSariol/CoveClient)**: the Go library Lighthouse uses to talk to Cove.
 
