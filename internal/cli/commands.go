@@ -445,20 +445,30 @@ const setupGuide = `Getting a repository ready for Lighthouse (e.g. "plop")
 3. A healthcheck in the compose file for anything that serves: Lighthouse
    waits until it's healthy, and puts the old version back if it isn't.
    Without one, a service only has to stay up for 10 seconds.
+   A service reached from outside also carries its public address, as
+   a full https:// URL:
+     labels:
+       com.mobasity.public-url: https://plop.mobasity.com
 
-4. Optional: tests. A Dockerfile stage named test (FROM ... AS test) is
-   built before every deploy, without secrets; if it fails, nothing is
-   deployed.
-   Optional: settings, in the compose file:
+4. Deploy from version tags, in the compose file:
      x-lighthouse:
        deploy: releases          only version tags (v1.2.3) deploy
-       tier: infra               data, infra or app: the order of deploys
-       backup: postgres          dump the database before each deploy
+       tier: infra               optional: data, infra or app, the
+                                 order of deploys
+       backup: postgres          optional: dump the database before
+                                 each deploy
+   Moving a running project over? Push a baseline tag on the default
+   branch first: a tag that already exists is never deployed.
 
-5. Add it. It's named after the repository (lowercase):
+5. Optional: tests. A Dockerfile stage named test (FROM ... AS test) is
+   built before every deploy, without secrets; if it fails, nothing is
+   deployed.
+
+6. Add it. It's named after the repository (lowercase):
      add https://github.com/LSariol/plop
      check plop                  would it deploy? (nothing is changed)
-   Lighthouse deploys the default branch's latest commit within a check.
+   Lighthouse deploys the newest version tag on the default branch
+   within a check, or its latest commit without deploy: releases.
    "status" shows each service; "logs plop:web" one service's output.
 
 What a deploy refuses: "help rules".
@@ -544,12 +554,12 @@ func (c *CLI) help(ctx context.Context, args []string) error {
 		}
 		cmd, ok := c.byName[topic]
 		if !ok {
-			return usageError{reason: fmt.Sprintf("Unknown command or guide %q.", args[1]), form: "help [command|setup|failed]"}
+			return usageError{reason: fmt.Sprintf("Unknown command or guide %q.", args[1]), form: "help [command|setup|failed|rules]"}
 		}
 		out(commandHelp(*cmd))
 		return nil
 	default:
-		return usageError{form: "help [command|setup|failed]"}
+		return usageError{form: "help [command|setup|failed|rules]"}
 	}
 }
 
