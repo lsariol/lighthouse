@@ -2,7 +2,7 @@
 
 All notable changes to Lighthouse. Versions follow [semantic versioning](https://semver.org).
 
-## v1.3.1 (unreleased)
+## v1.3.1 (2026-11-02)
 
 Lighthouse can now deploy Blackbox, Spark's central log store.
 
