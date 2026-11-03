@@ -92,23 +92,23 @@ type fileSource struct {
 }
 
 type service struct {
-	Privileged        bool              `json:"privileged"`
-	NetworkMode       string            `json:"network_mode"`
-	Pid               string            `json:"pid"`
-	Ipc               string            `json:"ipc"`
-	Uts               string            `json:"uts"`
-	UsernsMode        string            `json:"userns_mode"`
-	Cgroup            string            `json:"cgroup"`
-	CapAdd            []string          `json:"cap_add"`
-	Devices           []pathItem        `json:"devices"`
-	DeviceCgroupRules []string          `json:"device_cgroup_rules"`
-	SecurityOpt       []string          `json:"security_opt"`
-	VolumesFrom       []string          `json:"volumes_from"`
-	Volumes           []mount           `json:"volumes"`
-	EnvFile           []pathItem        `json:"env_file"`
-	Build             *build            `json:"build"`
-	ContainerName     string            `json:"container_name"`
-	Labels            labels            `json:"labels"`
+	Privileged        bool       `json:"privileged"`
+	NetworkMode       string     `json:"network_mode"`
+	Pid               string     `json:"pid"`
+	Ipc               string     `json:"ipc"`
+	Uts               string     `json:"uts"`
+	UsernsMode        string     `json:"userns_mode"`
+	Cgroup            string     `json:"cgroup"`
+	CapAdd            []string   `json:"cap_add"`
+	Devices           []pathItem `json:"devices"`
+	DeviceCgroupRules []string   `json:"device_cgroup_rules"`
+	SecurityOpt       []string   `json:"security_opt"`
+	VolumesFrom       []string   `json:"volumes_from"`
+	Volumes           []mount    `json:"volumes"`
+	EnvFile           []pathItem `json:"env_file"`
+	Build             *build     `json:"build"`
+	ContainerName     string     `json:"container_name"`
+	Labels            labels     `json:"labels"`
 	Networks          map[string]*struct {
 		Aliases []string `json:"aliases"`
 	} `json:"networks"`
