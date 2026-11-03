@@ -4,7 +4,7 @@ All notable changes to Lighthouse. Versions follow [semantic versioning](https:/
 
 ## v1.4.0 (2026-11-02)
 
-Lighthouse's logs follow Spark's logging standard, so Blackbox can read their levels and fields.
+Lighthouse's logs follow Spark's logging standard, so Blackbox can read their levels and fields, and labels may be written as a list.
 
 ### Changed
 - **`docker logs lighthouse` is JSON:** one record per line, through `blackboxlog`. `LOG_FORMAT=text` or `APP_ENV=dev` gives readable lines, `LOG_LEVEL` sets the level, and a local run with the CLI stays readable. Each deploy step's output is unchanged, as plain `[<project> <step>]` lines.
@@ -12,6 +12,12 @@ Lighthouse's logs follow Spark's logging standard, so Blackbox can read their le
 - **A startup failure is an `ERROR` record:** `Lighthouse can't run`, with the reason in `err`, so it shows up in a search by level. It used to be a plain `lighthouse: …` line.
 - **One failure, one line:** a failed deploy is no longer logged again as a failed check and a failed scan.
 - **Standard fields:** `component` says which part of Lighthouse wrote a line, `deploy finished` and `deploy failed` carry `outcome` and `duration_ms`, and `migration applied` has `duration_ms` instead of `took`. Lines no longer carry Lighthouse's own version, environment or compose project, which Blackbox reads from Docker, and the GitHub token's length is gone.
+- **Go 1.27.3:** picks up the standard library's security fixes.
+- **`help setup` follows the standard:** it recommends deploying from version tags, says to push a baseline tag before moving a running project over, and shows the `com.mobasity.public-url` label.
+
+### Fixed
+- **Labels written as a list:** `- key=value` stopped a deploy with `cannot unmarshal array`. A list now works like a map, and the public-address label is checked the same way in both.
+- `help` with a wrong argument left `rules` out of its usage line.
 
 ## v1.3.1 (2026-11-02)
 
