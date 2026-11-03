@@ -4,8 +4,10 @@ All notable changes to Lighthouse. Versions follow [semantic versioning](https:/
 
 ## v1.3.1 (unreleased)
 
+Lighthouse can now deploy Blackbox, Spark's central log store.
+
 ### Added
-- `policy.json`: Blackbox's Docker gateway (`blackbox-proxy`) may mount the Docker socket; no other Blackbox service may.
+- **Blackbox can be deployed:** the deploy rules refuse any project that mounts the Docker socket, and Blackbox needs it to read container logs. An exception now allows it for `blackbox-proxy`, the one service that has no network and only makes fixed, read-only requests. Blackbox's other services are still refused.
 
 ## v1.3.0 (2026-10-21)
 
