@@ -95,8 +95,8 @@ You'll need a Linux server with Docker and Docker Compose, a Postgres server for
    ```bash
    git clone https://github.com/lsariol/lighthouse.git
    cd lighthouse
-   git checkout v1.3.1      # the newest release
-   LIGHTHOUSE_DEPLOY_VERSION=v1.3.1 docker compose up -d --build
+   git checkout v1.4.0      # the newest release
+   LIGHTHOUSE_DEPLOY_VERSION=v1.4.0 docker compose up -d --build
    ```
 3. **Open the control prompt** and add your first project:
    ```bash

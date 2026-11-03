@@ -683,8 +683,8 @@ docker network inspect spark >/dev/null 2>&1 || docker network create spark
 # The database and its URL keys: §10.1.
 
 git clone https://github.com/lsariol/lighthouse.git && cd lighthouse
-git checkout v1.3.1                                               # the newest release
-LIGHTHOUSE_DEPLOY_VERSION=v1.3.1 docker compose up -d --build   # the version status shows; self-updates set it themselves
+git checkout v1.4.0                                               # the newest release
+LIGHTHOUSE_DEPLOY_VERSION=v1.4.0 docker compose up -d --build   # the version status shows; self-updates set it themselves
 docker logs -f lighthouse     # success: "migration applied" (first start only), then "Lighthouse ready"
 docker exec lighthouse /lighthouse status   # success: exit status 0 (otherwise: "Needs attention: ...")
 ```
