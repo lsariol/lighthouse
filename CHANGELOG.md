@@ -2,6 +2,11 @@
 
 All notable changes to Lighthouse. Versions follow [semantic versioning](https://semver.org).
 
+## v1.3.1 (unreleased)
+
+### Added
+- `policy.json`: Blackbox's Docker gateway (`blackbox-proxy`) may mount the Docker socket; no other Blackbox service may.
+
 ## v1.3.0 (2026-10-21)
 
 ### Added

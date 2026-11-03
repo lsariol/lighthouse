@@ -17,6 +17,14 @@
         "mount:/var/run/docker.sock"
       ],
       "reason": "Sonar's Docker gateway: answers the agent's two fixed read requests (container list, stats) with secrets stripped. No other Sonar service has the socket."
+    },
+    {
+      "project": "blackbox",
+      "service": "blackbox-proxy",
+      "allow": [
+        "mount:/var/run/docker.sock"
+      ],
+      "reason": "Blackbox's Docker gateway: lists containers and reads their logs through fixed requests, passing no environment or mounts. No other Blackbox service has the socket."
     }
   ]
 }
