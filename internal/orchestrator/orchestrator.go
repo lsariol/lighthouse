@@ -77,6 +77,10 @@ type Orchestrator struct {
 	gitToken   string
 	now        func() time.Time
 
+	log          *slog.Logger
+	reconcileLog *slog.Logger
+	publishLog   *slog.Logger
+
 	scanning sync.Mutex
 	paused   atomic.Bool
 	turn     turn
@@ -110,9 +114,13 @@ type watch struct {
 }
 
 // New returns an Orchestrator that checks with gitToken (Lighthouse's GitHub
-// token, read from Cove at startup).
-func New(store projects.Store, gh GitHub, deployer Deployer, containers Containers, gitToken string) *Orchestrator {
+// token, read from Cove at startup). A nil log means slog.Default().
+func New(store projects.Store, gh GitHub, deployer Deployer, containers Containers, gitToken string, log *slog.Logger) *Orchestrator {
+	if log == nil {
+		log = slog.Default()
+	}
 	return &Orchestrator{store: store, github: gh, deployer: deployer, containers: containers, gitToken: gitToken,
+		log: log.With("component", "orchestrator"), reconcileLog: log.With("component", "reconcile"), publishLog: log.With("component", "publish"),
 		now: time.Now, watches: map[string]*watch{}, handOffPoll: 2 * time.Second, publishWake: make(chan struct{}, 1)}
 }
 
@@ -133,13 +141,13 @@ func (o *Orchestrator) Run(ctx context.Context, interval time.Duration) {
 
 	for {
 		if !o.IsPaused() {
-			if err := o.Scan(ctx); err != nil && !errors.Is(err, ErrScanRunning) && ctx.Err() == nil {
-				slog.Error("scan finished with errors", "err", err)
+			if err := o.Scan(ctx); err != nil && !errors.Is(err, ErrScanRunning) && !errors.Is(err, errChecksFailed) && ctx.Err() == nil {
+				o.log.Error("scan failed", "err", err)
 			}
 			if o.now().Sub(lastReconcile) >= ReconcileEvery {
 				lastReconcile = o.now()
 				if err := o.Reconcile(ctx); err != nil && ctx.Err() == nil {
-					slog.Error("reconcile finished with errors", "err", err)
+					o.reconcileLog.Error("reconcile finished with errors", "err", err)
 				}
 			}
 		}
@@ -192,16 +200,18 @@ func (o *Orchestrator) Scan(ctx context.Context) error {
 			return ctx.Err()
 		}
 		if err := o.check(ctx, p); err != nil {
-			slog.Error("check failed", "project", p.Name, "err", err)
 			failed = append(failed, p.Name)
 		}
 	}
 
 	if len(failed) > 0 {
-		return fmt.Errorf("checks failed for %s (each project's error is logged, and shown by \"list\")", strings.Join(failed, ", "))
+		return fmt.Errorf("%w for %s (each project's error is logged, and shown by \"list\")", errChecksFailed, strings.Join(failed, ", "))
 	}
 	return nil
 }
+
+// errChecksFailed is a scan where a project failed; each one is already logged.
+var errChecksFailed = errors.New("checks failed")
 
 // ErrBroken means a project's latest commit failed BrokenAfter times and
 // isn't tried again until a new commit appears or `retry` clears it.
@@ -230,6 +240,7 @@ func (o *Orchestrator) check(ctx context.Context, p projects.Project) error {
 	if p.PublishOnly() {
 		err := o.checkPublishOnly(ctx, p, w)
 		if err != nil {
+			o.logCheckFailed(ctx, p.Name, err)
 			o.wait(w, p.Name, err)
 		}
 		return o.record(ctx, p.Name, err, true)
@@ -240,19 +251,30 @@ func (o *Orchestrator) check(ctx context.Context, p projects.Project) error {
 	case err == nil && ok && o.deployer.HandOffInProgress(p.Name):
 		return o.record(ctx, p.Name, nil, true)
 	case err != nil:
+		o.logCheckFailed(ctx, p.Name, err)
 		o.wait(w, p.Name, err)
 	case !ok:
 		err = nil
 	case p.Broken && t.sha == p.FailingSHA:
 		return o.record(ctx, p.Name, nil, false)
 	default:
-		slog.Info("deploying", "project", p.Name, "what", t.String())
+		o.log.Info("deploying", "project", p.Name, "what", t.String())
 		err = o.deploy(ctx, p, t, projects.TriggerCheck)
 		if errors.Is(err, ErrHandedOff) || errors.Is(err, ErrUpdating) {
 			err = nil
 		}
 	}
 	return o.record(ctx, p.Name, err, true)
+}
+
+// logCheckFailed logs a check that failed before any deploy, which logs its
+// own failure. A passing failure is tried again, so it's only a warning.
+func (o *Orchestrator) logCheckFailed(ctx context.Context, name string, err error) {
+	level := slog.LevelError
+	if transientErr(err) {
+		level = slog.LevelWarn
+	}
+	o.log.Log(ctx, level, "check failed", "project", name, "err", err)
 }
 
 // head is the newest commit on p's default branch, asked with the last ETag.
@@ -367,7 +389,7 @@ func (o *Orchestrator) trackTags(ctx context.Context, p *projects.Project, w *wa
 			if err := o.store.SetReleaseStatus(ctx, p.Name, t.Name, projects.ReleaseMoved, note); err != nil {
 				return nil, err
 			}
-			slog.Warn("a release's tag moved to another commit; it isn't deployed or published", "project", p.Name, "tag", t.Name,
+			o.log.Warn("a release's tag moved to another commit; it isn't deployed or published", "project", p.Name, "tag", t.Name,
 				"was", short(rows[i].SHA), "now", short(t.SHA))
 			rows[i].Status, rows[i].Note = projects.ReleaseMoved, note
 		case rows[i].Status == projects.ReleaseWaiting && w.waitedHead != w.head:
@@ -379,7 +401,7 @@ func (o *Orchestrator) trackTags(ctx context.Context, p *projects.Project, w *wa
 				if err := o.store.SetReleaseStatus(ctx, p.Name, t.Name, projects.ReleaseReady, ""); err != nil {
 					return nil, err
 				}
-				slog.Info("a release reached the default branch", "project", p.Name, "tag", t.Name)
+				o.log.Info("a release reached the default branch", "project", p.Name, "tag", t.Name)
 				rows[i].Status, rows[i].Note = projects.ReleaseReady, ""
 			}
 		}
@@ -392,7 +414,7 @@ func (o *Orchestrator) trackTags(ctx context.Context, p *projects.Project, w *wa
 			return nil, err
 		}
 		for _, r := range added {
-			slog.Info("new release tag", "project", p.Name, "tag", r.Tag, "status", r.Status, "note", r.Note)
+			o.log.Info("new release tag", "project", p.Name, "tag", r.Tag, "status", r.Status, "note", r.Note)
 		}
 		p.ReleasesTracked = true
 		if baseline {
@@ -412,7 +434,7 @@ func (o *Orchestrator) adopt(ctx context.Context, p projects.Project, baseline [
 	}
 	existing, err := o.github.Releases(ctx, p.Repo, o.gitToken)
 	if err != nil {
-		slog.Warn("existing GitHub Releases can't be listed; older tags show as known", "project", p.Name, "err", err)
+		o.log.Warn("existing GitHub Releases can't be listed; older tags show as known", "project", p.Name, "err", err)
 		return
 	}
 	byTag := map[string]github.Release{}
@@ -429,7 +451,7 @@ func (o *Orchestrator) adopt(ctx context.Context, p projects.Project, baseline [
 		url := rel.URL
 		res := projects.Published{Status: projects.ReleasePublished, URL: url, At: rel.When(o.now()), Note: "its Release already existed, so Lighthouse adopted it"}
 		if err := o.store.RecordPublish(ctx, p.Name, r.Tag, res); err != nil {
-			slog.Warn("adopting an existing Release failed; it shows as known", "project", p.Name, "tag", r.Tag, "err", err)
+			o.log.Warn("adopting an existing Release failed; it shows as known", "project", p.Name, "tag", r.Tag, "err", err)
 			continue
 		}
 		baseline[i].Status, baseline[i].URL, baseline[i].Note = res.Status, url, res.Note
@@ -463,7 +485,7 @@ func (o *Orchestrator) checkPublishOnly(ctx context.Context, p projects.Project,
 		if err := o.store.SetReleaseStatus(ctx, p.Name, r.Tag, projects.ReleasePending, ""); err != nil {
 			return err
 		}
-		slog.Info("a release is due to be published", "project", p.Name, "tag", r.Tag)
+		o.log.Info("a release is due to be published", "project", p.Name, "tag", r.Tag)
 		queued = true
 	}
 	if queued {
@@ -549,7 +571,7 @@ func (o *Orchestrator) readSettings(ctx context.Context, p *projects.Project, sh
 		if err := o.store.SetSettings(ctx, p.Name, s.Deploy, s.Tier); err != nil {
 			return err
 		}
-		slog.Info("settings", "project", p.Name, "deploy", s.Deploy, "tier", s.Tier)
+		o.log.Info("settings", "project", p.Name, "deploy", s.Deploy, "tier", s.Tier)
 		p.Mode, p.Tier = s.Deploy, s.Tier
 	}
 	return nil
@@ -564,7 +586,7 @@ func (o *Orchestrator) wait(w *watch, name string, err error) {
 	}
 	w.backoff = min(max(2*w.backoff, minBackoff), maxBackoff)
 	w.nextAttempt = o.now().Add(w.backoff)
-	slog.Info("trying again later", "project", name, "in", w.backoff.String())
+	o.log.Info("trying again later", "project", name, "in", w.backoff.String())
 }
 
 // transient is a deploy that failed for a passing reason.
@@ -594,7 +616,7 @@ func (o *Orchestrator) record(ctx context.Context, name string, err error, setEr
 		}
 	}
 	if recErr != nil && !errors.Is(recErr, projects.ErrNotFound) {
-		slog.Error("recording a check failed", "project", name, "err", recErr)
+		o.log.Error("recording a check failed", "project", name, "err", recErr)
 	}
 	return err
 }
@@ -651,7 +673,7 @@ func (o *Orchestrator) hold(ctx context.Context, p projects.Project, t target, l
 		return fmt.Errorf("record the commit %s went back from: %w", p.Name, err)
 	}
 	if held != "" {
-		slog.Info("holding a commit: checks won't deploy it again", "project", p.Name, "sha", short(held))
+		o.log.Info("holding a commit: checks won't deploy it again", "project", p.Name, "sha", short(held))
 	}
 	return nil
 }
@@ -774,15 +796,19 @@ func (o *Orchestrator) RecordHandOffs(ctx context.Context) {
 	defer o.recording.Unlock()
 	handOffs, err := o.deployer.HandOffs()
 	if err != nil {
-		slog.Error("self-update results can't be read", "err", err)
+		o.log.Error("self-update results can't be read", "err", err)
 		return
 	}
 	for _, h := range handOffs {
 		d := h.Deployment()
-		slog.Info("self-update finished", "project", d.Project, "sha", short(d.SHA), "status", d.Status, "err", d.Error)
+		if d.Status == projects.StatusSucceeded {
+			o.log.Info("self-update finished", "project", d.Project, "sha", short(d.SHA))
+		} else {
+			o.log.Error("self-update failed", "project", d.Project, "sha", short(d.SHA), "status", d.Status, "err", d.Error)
+		}
 		o.recordDeployment(ctx, d)
 		if err := o.deployer.Forget(h); err != nil {
-			slog.Error("a recorded self-update can't be removed; it may be recorded twice", "err", err)
+			o.log.Error("a recorded self-update can't be removed; it may be recorded twice", "err", err)
 		}
 	}
 }
@@ -831,7 +857,7 @@ func (o *Orchestrator) deploy(ctx context.Context, p projects.Project, t target,
 			o.pausedByHand.Store(true)
 			o.Pause()
 		}
-		slog.Info("self-update handed off: the helper replaces this Lighthouse now", "sha", short(t.sha), "helper", deploy.HelperName)
+		o.log.Info("self-update handed off: the helper replaces this Lighthouse now", "sha", short(t.sha), "helper", deploy.HelperName)
 		go o.awaitHandOff(p.Name)
 		return ErrHandedOff
 	}
@@ -865,7 +891,7 @@ func (o *Orchestrator) deploy(ctx context.Context, p projects.Project, t target,
 	}
 	w.backoff, w.nextAttempt = 0, time.Time{}
 	if now, err := o.store.Get(context.WithoutCancel(ctx), p.Name); err == nil && now.Broken {
-		slog.Warn("project is broken: its latest commit isn't tried again until a new one or `retry`",
+		o.log.Error("project is broken: its latest commit isn't tried again until a new one or `retry`",
 			"project", p.Name, "sha", short(t.sha), "failures", now.FailureCount)
 		return fmt.Errorf("%w after %d failed deploys of %s: %v", ErrBroken, now.FailureCount, t, res.Err)
 	}
@@ -881,7 +907,7 @@ func (o *Orchestrator) awaitHandOff(name string) {
 		if o.deployer.HandOffInProgress(name) && time.Now().Before(deadline) {
 			continue
 		}
-		slog.Info("the update helper finished without replacing this Lighthouse; recording the result and carrying on", "project", name)
+		o.log.Info("the update helper finished without replacing this Lighthouse; recording the result and carrying on", "project", name)
 		o.RecordHandOffs(context.Background())
 		o.turn.release()
 		if o.pausedByHand.CompareAndSwap(true, false) {
@@ -908,10 +934,10 @@ func (o *Orchestrator) recordDeployment(ctx context.Context, d projects.Deployme
 			return
 		}
 		if time.Now().After(deadline) {
-			slog.Error("recording a deployment failed", "project", d.Project, "err", err)
+			o.log.Error("recording a deployment failed", "project", d.Project, "err", err)
 			return
 		}
-		slog.Warn("recording a deployment failed; trying again", "project", d.Project, "err", err)
+		o.log.Warn("recording a deployment failed; trying again", "project", d.Project, "err", err)
 		time.Sleep(2 * time.Second)
 	}
 }

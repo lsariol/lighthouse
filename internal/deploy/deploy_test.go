@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -287,7 +288,7 @@ func newEnv(t *testing.T) *env {
 		e.docker.set("website", "db", "db-1", "postgres-img", running)
 	}
 	e.d = New(e.compose, e.docker, e.source, e.secrets, Options{
-		Root: e.root, Log: e.log, Poll: time.Millisecond,
+		Root: e.root, Output: e.log, Poll: time.Millisecond,
 		Timeouts: Timeouts{Verify: 2 * time.Second, Stable: 20 * time.Millisecond},
 	})
 	return e
@@ -620,5 +621,42 @@ func TestRepository(t *testing.T) {
 	}
 	if normalizeName("My.Site_2") != "mysite_2" {
 		t.Errorf("normalizeName = %q", normalizeName("My.Site_2"))
+	}
+}
+
+func TestDeployLogLines(t *testing.T) {
+	cases := []struct {
+		name    string
+		setup   func(e *env)
+		msg     string
+		level   string
+		outcome string
+	}{
+		{"finished", nil, "deploy finished", "INFO", "ok"},
+		{"tried again later", func(e *env) { e.source.err = &github.Error{Status: 502, Err: errors.New("502 Bad Gateway")} },
+			"deploy failed", "WARN", "error"},
+		{"needs a person", func(e *env) { e.source.err = &github.Error{Status: 404, Err: errors.New("404 Not Found")} },
+			"deploy failed", "ERROR", "error"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			e := newEnv(t)
+			if c.setup != nil {
+				c.setup(e)
+			}
+			var buf bytes.Buffer
+			e.d.log = slog.New(slog.NewJSONHandler(&buf, nil))
+
+			e.deploy(t, landing, sha1)
+
+			lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+			var last map[string]any
+			if err := json.Unmarshal([]byte(lines[len(lines)-1]), &last); err != nil {
+				t.Fatal(err)
+			}
+			if _, whole := last["duration_ms"].(float64); !whole || last["msg"] != c.msg || last["level"] != c.level || last["outcome"] != c.outcome {
+				t.Errorf("last line = %v", last)
+			}
+		})
 	}
 }

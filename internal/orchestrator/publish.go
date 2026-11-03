@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -76,7 +75,7 @@ func (o *Orchestrator) wakePublisher() {
 func (o *Orchestrator) PublishDue(ctx context.Context) {
 	due, err := o.store.DueReleases(ctx, o.now())
 	if err != nil {
-		slog.Error("publishing: can't read the releases to publish", "err", err)
+		o.publishLog.Error("can't read the releases to publish", "err", err)
 		return
 	}
 	for _, r := range due {
@@ -98,12 +97,12 @@ func (o *Orchestrator) publish(ctx context.Context, r projects.Release) projects
 	res := o.tryPublish(ctx, p, r)
 	switch {
 	case res.Status == projects.ReleasePublished:
-		slog.Info("published a GitHub Release", "project", p.Name, "tag", r.Tag, "url", res.URL, "note", res.Note)
+		o.publishLog.Info("published a GitHub Release", "project", p.Name, "tag", r.Tag, "url", res.URL, "note", res.Note)
 	case res.Error != "":
-		slog.Warn("publishing a GitHub Release failed", "project", p.Name, "tag", r.Tag, "status", res.Status, "err", res.Error)
+		o.publishLog.Warn("publishing a GitHub Release failed", "project", p.Name, "tag", r.Tag, "status", res.Status, "err", res.Error)
 	}
 	if err := o.store.RecordPublish(context.WithoutCancel(ctx), p.Name, r.Tag, res); err != nil {
-		slog.Error("publishing: recording the attempt failed; it's tried again", "project", p.Name, "tag", r.Tag, "err", err)
+		o.publishLog.Error("recording the attempt failed; it's tried again", "project", p.Name, "tag", r.Tag, "err", err)
 	}
 	return res
 }

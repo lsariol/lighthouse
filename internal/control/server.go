@@ -15,7 +15,8 @@ import (
 )
 
 // Handler serves svc over HTTP, under /v1.
-func Handler(svc Service) http.Handler {
+func Handler(svc Service, log *slog.Logger) http.Handler {
+	respond := func(w http.ResponseWriter, data any, err error) { reply(log, w, data, err) }
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /v1/status", func(w http.ResponseWriter, r *http.Request) {
@@ -160,13 +161,13 @@ var statusFor = map[string]int{
 	KindInternal:    http.StatusInternalServerError,
 }
 
-func respond(w http.ResponseWriter, data any, err error) {
+func reply(log *slog.Logger, w http.ResponseWriter, data any, err error) {
 	w.Header().Set("Content-Type", "application/json")
 
 	if err != nil {
 		var e *Error
 		if !errors.As(err, &e) {
-			slog.Error("control request failed", "err", err)
+			log.Error("control request failed", "err", err)
 			e = &Error{Kind: KindInternal, Message: err.Error()}
 		}
 		status, ok := statusFor[e.Kind]
@@ -180,7 +181,7 @@ func respond(w http.ResponseWriter, data any, err error) {
 
 	raw, err := json.Marshal(data)
 	if err != nil {
-		respond(w, nil, err)
+		reply(log, w, nil, err)
 		return
 	}
 	json.NewEncoder(w).Encode(envelope{Data: raw})
@@ -188,7 +189,7 @@ func respond(w http.ResponseWriter, data any, err error) {
 
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(v); err != nil {
-		respond(w, nil, Errorf(KindInvalid, "invalid request body: %v", err))
+		reply(slog.Default(), w, nil, Errorf(KindInvalid, "invalid request body: %v", err))
 		return false
 	}
 	return true
@@ -196,7 +197,7 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 
 // Serve listens on the Unix socket at path and serves svc until ctx is
 // cancelled.
-func Serve(ctx context.Context, path string, svc Service) error {
+func Serve(ctx context.Context, path string, svc Service, log *slog.Logger) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("control socket: %w", err)
 	}
@@ -220,7 +221,7 @@ func Serve(ctx context.Context, path string, svc Service) error {
 	}
 
 	server := &http.Server{
-		Handler:           Handler(svc),
+		Handler:           Handler(svc, log),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

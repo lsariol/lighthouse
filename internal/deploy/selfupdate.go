@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -149,7 +148,7 @@ func (d *Deployer) FinishHandOff(ctx context.Context, path string) error {
 	}
 
 	r := &run{d: d, req: Request{Project: h.Project, SHA: h.SHA, Version: h.Version, Trigger: h.Trigger},
-		log: slog.With("project", h.Project.Name, "sha", short(h.SHA)), previous: h.Previous,
+		log: d.log.With("project", h.Project.Name, "sha", short(h.SHA)), previous: h.Previous,
 		prevEnv: []string{}, fallbackDir: h.Dir}
 	project := compose.Project{Name: h.ComposeProject, Services: h.Services}
 	env := deployVars(h.SHA, h.Version)
@@ -210,7 +209,7 @@ func (d *Deployer) handOffs() ([]HandOff, error) {
 		}
 		h, err := readHandOff(filepath.Join(d.handOffDir(), e.Name()))
 		if err != nil {
-			slog.Error("a self-update hand-off can't be read; it's left for a person to look at", "err", err)
+			d.log.Error("a self-update hand-off can't be read; it's left for a person to look at", "err", err)
 			continue
 		}
 		all = append(all, h)

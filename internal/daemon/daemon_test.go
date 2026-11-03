@@ -124,7 +124,7 @@ func newDaemon(t *testing.T) (*Daemon, *fakeContainers, *fakeCompose, *projectst
 	}}
 	cmp := &fakeCompose{}
 	d := New(config.Config{Env: "dev", StagingPath: t.TempDir()}, "test", c, cmp)
-	d.Ready(store, orchestrator.New(store, fakeCommits{}, fakeDeployer{}, nil, "t"), fakeHealth{3, 3})
+	d.Ready(store, orchestrator.New(store, fakeCommits{}, fakeDeployer{}, nil, "t", nil), fakeHealth{3, 3})
 
 	ctx := context.Background()
 	if _, err := d.Add(ctx, "personalWebsite", "https://github.com/lsariol/landing", false); err != nil {
@@ -233,7 +233,7 @@ func TestPublish(t *testing.T) {
 		t.Errorf("status: publishing %q", s.Publishing)
 	}
 
-	o := orchestrator.New(store, fakeCommits{}, fakeDeployer{}, nil, "t")
+	o := orchestrator.New(store, fakeCommits{}, fakeDeployer{}, nil, "t", nil)
 	o.SetPublisher(fakePublisher{}, "")
 	d.cfg.GitHubAppID = "42"
 	d.Ready(store, o, fakeHealth{3, 3})

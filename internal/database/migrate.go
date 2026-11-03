@@ -27,7 +27,7 @@ const migrationsTable = "lighthouse.goose_db_version"
 const undefinedTable = "42P01"
 
 // Migrate applies every pending migration.
-func Migrate(ctx context.Context, connString string) error {
+func Migrate(ctx context.Context, connString string, log *slog.Logger) error {
 	provider, db, err := newProvider(ctx, connString)
 	if err != nil {
 		return err
@@ -36,13 +36,13 @@ func Migrate(ctx context.Context, connString string) error {
 
 	results, err := provider.Up(ctx)
 	for _, r := range results {
-		slog.Info("migration applied", "migration", r.Source.Path, "took", r.Duration.String())
+		log.Info("migration applied", "migration", r.Source.Path, "duration_ms", r.Duration.Milliseconds())
 	}
 	if err != nil {
 		return fmt.Errorf("database: apply migrations: %w", err)
 	}
 	if len(results) == 0 {
-		slog.Info("database schema is up to date")
+		log.Info("database schema is up to date")
 	}
 	return nil
 }

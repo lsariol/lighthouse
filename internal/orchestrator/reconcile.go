@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -35,7 +34,7 @@ func (o *Orchestrator) Reconcile(ctx context.Context) error {
 		down, why, err := o.down(ctx, p)
 		if err != nil {
 			failed = append(failed, p.Name)
-			slog.Error("reconcile: can't tell whether a project is running", "project", p.Name, "err", err)
+			o.reconcileLog.Error("can't tell whether a project is running", "project", p.Name, "err", err)
 			continue
 		}
 		if !down {
@@ -44,7 +43,7 @@ func (o *Orchestrator) Reconcile(ctx context.Context) error {
 		}
 		if w.downSince.IsZero() {
 			w.downSince = o.now()
-			slog.Info("reconcile: project looks down; checking again next pass", "project", p.Name, "why", why)
+			o.reconcileLog.Info("project looks down; checking again next pass", "project", p.Name, "why", why)
 			continue
 		}
 		if o.now().Before(w.nextAttempt) {
@@ -52,7 +51,7 @@ func (o *Orchestrator) Reconcile(ctx context.Context) error {
 		}
 
 		t := target{sha: p.DeployedSHA, version: p.DeployedVersion}
-		slog.Warn("reconcile: bringing a project back", "project", p.Name, "why", why, "what", t.String())
+		o.reconcileLog.Warn("bringing a project back", "project", p.Name, "why", why, "what", t.String())
 		if err := o.deploy(ctx, p, t, projects.TriggerReconcile); err != nil {
 			failed = append(failed, p.Name)
 			o.record(ctx, p.Name, err, true)

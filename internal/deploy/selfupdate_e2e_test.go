@@ -74,7 +74,7 @@ services:
 	source := &fakeSource{}
 	var log bytes.Buffer
 	dep := New(runner, d, source, &fakeSecrets{}, Options{
-		Root: root, Self: project, Log: &log, Poll: 500 * time.Millisecond,
+		Root: root, Self: project, Output: &log, Poll: 500 * time.Millisecond,
 		Timeouts: Timeouts{Verify: 60 * time.Second, Stable: 2 * time.Second},
 	})
 	p := projects.Project{Name: project, Repo: landing.Repo}

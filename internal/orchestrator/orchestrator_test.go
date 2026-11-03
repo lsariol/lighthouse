@@ -313,7 +313,7 @@ func setup(t *testing.T, gh *fakeGitHub, names ...string) (*Orchestrator, *proje
 		}
 	}
 	d := &fakeDeployer{}
-	o := New(store, gh, d, nil, "t")
+	o := New(store, gh, d, nil, "t", nil)
 	c := &clock{t: time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)}
 	o.now = c.now
 	return o, store, d, c
@@ -1021,7 +1021,7 @@ func TestComposeProjectConflict(t *testing.T) {
 	store.Add(ctx, "first", github.Repo{Owner: "x", Name: "site"})
 	store.Add(ctx, "second", github.Repo{Owner: "y", Name: "site"})
 	d := &fakeDeployer{}
-	o := New(store, newGitHub(map[string]string{"site": "aaa"}), d, nil, "t")
+	o := New(store, newGitHub(map[string]string{"site": "aaa"}), d, nil, "t", nil)
 
 	if err := o.Deploy(ctx, "first", ""); err != nil {
 		t.Fatal(err)
@@ -1038,7 +1038,7 @@ func TestCheck(t *testing.T) {
 	store.Add(ctx, "first", github.Repo{Owner: "x", Name: "site"})
 	store.Add(ctx, "second", github.Repo{Owner: "y", Name: "site"})
 	d := &fakeDeployer{}
-	o := New(store, newGitHub(map[string]string{"site": "aaa"}), d, nil, "t")
+	o := New(store, newGitHub(map[string]string{"site": "aaa"}), d, nil, "t", nil)
 
 	res, sha, err := o.Check(ctx, "first")
 	if err != nil || sha != "aaa" || res.Status != projects.StatusSucceeded {
@@ -1066,7 +1066,7 @@ func TestNoDeployWithoutToken(t *testing.T) {
 	store := &projectstest.Store{}
 	store.Add(context.Background(), "a", github.Repo{Owner: "o", Name: "a"})
 	d := &fakeDeployer{}
-	o := New(store, newGitHub(map[string]string{"a": "aaa"}), d, nil, "")
+	o := New(store, newGitHub(map[string]string{"a": "aaa"}), d, nil, "", nil)
 
 	if err := o.Scan(context.Background()); err == nil {
 		t.Error("Scan without a GitHub token succeeded")

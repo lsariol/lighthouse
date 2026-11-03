@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -109,7 +110,7 @@ func serve(t *testing.T, svc Service) (*Client, string) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	done := make(chan error, 1)
-	go func() { done <- Serve(ctx, socket, svc) }()
+	go func() { done <- Serve(ctx, socket, svc, slog.Default()) }()
 	t.Cleanup(func() {
 		cancel()
 		if err := <-done; err != nil {
@@ -238,7 +239,7 @@ func TestUnreachable(t *testing.T) {
 
 func TestSocketInUse(t *testing.T) {
 	_, socket := serve(t, &fakeService{})
-	if err := Serve(context.Background(), socket, &fakeService{}); err == nil {
+	if err := Serve(context.Background(), socket, &fakeService{}, slog.Default()); err == nil {
 		t.Error("a second Serve on the same socket succeeded")
 	}
 }
@@ -251,7 +252,7 @@ func TestStaleSocketIsReplaced(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- Serve(ctx, socket, &fakeService{}) }()
+	go func() { done <- Serve(ctx, socket, &fakeService{}, slog.Default()) }()
 
 	c := NewClient(socket)
 	var err error

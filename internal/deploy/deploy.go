@@ -85,7 +85,8 @@ type Options struct {
 	Self     string
 	Backups  string
 	Timeouts Timeouts
-	Log      io.Writer
+	Output   io.Writer    // each step's output, as it runs
+	Log      *slog.Logger // slog.Default() when nil
 	Poll     time.Duration
 }
 
@@ -101,7 +102,8 @@ type Deployer struct {
 	self     string
 	policy   policy.Policy
 	timeouts Timeouts
-	log      io.Writer
+	output   io.Writer
+	log      *slog.Logger
 	poll     time.Duration
 
 	mu             sync.Mutex
@@ -121,16 +123,20 @@ func New(c Compose, d Docker, s Source, sec Secrets, opts Options) *Deployer {
 			*f.v = f.d
 		}
 	}
+	output := opts.Output
+	if output == nil {
+		output = io.Discard
+	}
 	log := opts.Log
 	if log == nil {
-		log = io.Discard
+		log = slog.Default()
 	}
 	poll := opts.Poll
 	if poll == 0 {
 		poll = 2 * time.Second
 	}
 	return &Deployer{compose: c, docker: d, source: s, secrets: sec, root: opts.Root, storage: opts.Storage, backups: opts.Backups, self: opts.Self, policy: opts.Policy,
-		timeouts: t, log: log, poll: poll}
+		timeouts: t, output: output, log: log.With("component", "deploy"), poll: poll}
 }
 
 // Request is one deploy.
@@ -205,7 +211,7 @@ func (d *Deployer) Deploy(ctx context.Context, req Request) Result {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	r := &run{d: d, req: req, log: slog.With("project", req.Project.Name, "sha", short(req.SHA)), started: time.Now()}
+	r := &run{d: d, req: req, log: d.log.With("project", req.Project.Name, "sha", short(req.SHA)), started: time.Now()}
 	r.log.Info("deploy started")
 	res := r.deploy(ctx)
 	res.Steps = r.steps
@@ -214,9 +220,14 @@ func (d *Deployer) Deploy(ctx context.Context, req Request) Result {
 	case res.HandedOff:
 		r.log.Info("deploy handed off to the update helper", "helper", HelperName)
 	case res.Status == projects.StatusSucceeded:
-		r.log.Info("deploy finished")
+		r.log.Info("deploy finished", "outcome", "ok", "duration_ms", time.Since(r.started).Milliseconds())
 	default:
-		r.log.Error("deploy failed", "status", res.Status, "step", res.FailedStep, "kind", res.FailureKind, "err", res.Err)
+		level := slog.LevelError
+		if res.FailureKind == projects.FailureTransient {
+			level = slog.LevelWarn
+		}
+		r.log.Log(ctx, level, "deploy failed", "outcome", "error", "duration_ms", time.Since(r.started).Milliseconds(),
+			"status", res.Status, "step", res.FailedStep, "kind", res.FailureKind, "err", res.Err)
 	}
 	return res
 }
@@ -226,7 +237,7 @@ func (d *Deployer) Check(ctx context.Context, req Request) Result {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	r := &run{d: d, req: req, dry: true, log: slog.With("project", req.Project.Name, "sha", short(req.SHA), "check", true), started: time.Now()}
+	r := &run{d: d, req: req, dry: true, log: d.log.With("project", req.Project.Name, "sha", short(req.SHA), "check", true), started: time.Now()}
 	res := r.deploy(ctx)
 	res.Steps = r.steps
 	return res
@@ -368,7 +379,7 @@ func (r *run) step(ctx context.Context, name string, fn func(ctx context.Context
 	defer cancel()
 
 	r.stepLog = newTail(projects.MaxLogLength)
-	prefixed := &prefixWriter{w: r.d.log, prefix: "[" + r.req.Project.Name + " " + name + "] "}
+	prefixed := &prefixWriter{w: r.d.output, prefix: "[" + r.req.Project.Name + " " + name + "] "}
 	if r.scrub == nil {
 		r.scrub = newScrubber(nil)
 	}

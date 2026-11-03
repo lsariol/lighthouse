@@ -64,7 +64,7 @@ services:
 	source := &fakeSource{}
 	var log bytes.Buffer
 	dep := New(runner, d, source, &fakeSecrets{values: map[string]string{"LIGHTHOUSE_E2E_SECRET": "very-secret-value"}}, Options{
-		Root: t.TempDir(), Log: &log, Poll: 500 * time.Millisecond,
+		Root: t.TempDir(), Output: &log, Poll: 500 * time.Millisecond,
 		Timeouts: Timeouts{Verify: 60 * time.Second, Stable: 2 * time.Second},
 	})
 	p := projects.Project{Name: "e2e", Repo: landing.Repo}

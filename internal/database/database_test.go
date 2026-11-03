@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
@@ -35,7 +36,7 @@ func open(t *testing.T) *Database {
 	ctx := context.Background()
 
 	var migrateErr error
-	migrateOnce.Do(func() { migrateErr = Migrate(ctx, migratorURL) })
+	migrateOnce.Do(func() { migrateErr = Migrate(ctx, migratorURL, slog.Default()) })
 	if migrateErr != nil {
 		t.Fatal(migrateErr)
 	}
@@ -60,7 +61,7 @@ func TestMigrationsAreRepeatable(t *testing.T) {
 	db := open(t)
 	ctx := context.Background()
 
-	if err := Migrate(ctx, migratorURL); err != nil {
+	if err := Migrate(ctx, migratorURL, slog.Default()); err != nil {
 		t.Fatalf("a second Migrate: %v", err)
 	}
 	if err := db.CheckSchemaVersion(ctx); err != nil {
@@ -135,7 +136,7 @@ func TestUnreachable(t *testing.T) {
 	if err == nil || !IsUnreachable(err) || !strings.Contains(err.Error(), "LIGHTHOUSE_DATABASE_URL") {
 		t.Errorf("Connect to nothing = %v (unreachable: %v)", err, IsUnreachable(err))
 	}
-	if err := Migrate(context.Background(), nowhere); err == nil || !IsUnreachable(err) {
+	if err := Migrate(context.Background(), nowhere, slog.Default()); err == nil || !IsUnreachable(err) {
 		t.Errorf("Migrate against nothing = %v (unreachable: %v)", err, IsUnreachable(err))
 	}
 	if appURL == "" {

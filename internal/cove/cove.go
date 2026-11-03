@@ -42,7 +42,7 @@ type Secrets struct {
 }
 
 // Connect makes c ready to use.
-func Connect(ctx context.Context, c *coveclient.Client, tokenPath string, retry time.Duration) error {
+func Connect(ctx context.Context, c *coveclient.Client, tokenPath string, retry time.Duration, log *slog.Logger) error {
 	for {
 		_, err := c.LoadOrBootstrap(tokenPath)
 		if err == nil {
@@ -52,9 +52,9 @@ func Connect(ctx context.Context, c *coveclient.Client, tokenPath string, retry 
 		var urlErr *url.Error
 		switch {
 		case errors.Is(err, coveclient.ErrBootstrapClosed):
-			slog.Warn("waiting for a Cove token: run \"bootstrap open lighthouse\" in the Cove shell", "reason", err)
+			log.Warn("waiting for a Cove token: run \"bootstrap open lighthouse\" in the Cove shell", "err", err)
 		case errors.As(err, &urlErr):
-			slog.Warn("waiting for Cove to be reachable", "url", c.BaseURL, "err", err)
+			log.Warn("waiting for Cove to be reachable", "url", c.BaseURL, "err", err)
 		default:
 			return err
 		}
@@ -66,7 +66,7 @@ func Connect(ctx context.Context, c *coveclient.Client, tokenPath string, retry 
 		}
 	}
 
-	slog.Info("waiting for Cove to be ready", "url", c.BaseURL)
+	log.Info("waiting for Cove to be ready", "url", c.BaseURL)
 	if err := c.WaitForReady(ctx); err != nil {
 		return err
 	}

@@ -111,7 +111,7 @@ func TestPublishRetries(t *testing.T) {
 
 	pub.err = github.ErrNotInstalled
 	c.advance(time.Hour)
-	o2 := New(store, gh, &fakeDeployer{}, nil, "t")
+	o2 := New(store, gh, &fakeDeployer{}, nil, "t", nil)
 	o2.now = c.now
 	o2.SetPublisher(pub, "")
 	o2.PublishDue(ctx)

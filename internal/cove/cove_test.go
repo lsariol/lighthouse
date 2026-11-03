@@ -3,6 +3,7 @@ package cove
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -90,7 +91,7 @@ func TestFirstStartWaitsForBootstrap(t *testing.T) {
 	c := start(t, f)
 	path := filepath.Join(t.TempDir(), "cove", "token")
 
-	if err := Connect(context.Background(), c, path, 10*time.Millisecond); err != nil {
+	if err := Connect(context.Background(), c, path, 10*time.Millisecond, slog.Default()); err != nil {
 		t.Fatal(err)
 	}
 	saved, err := os.ReadFile(path)
@@ -109,7 +110,7 @@ func TestRejectedTokenExplainsTheFix(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "token")
 	os.WriteFile(path, []byte("cove_old\n"), 0o600)
 
-	err := Connect(context.Background(), c, path, time.Millisecond)
+	err := Connect(context.Background(), c, path, time.Millisecond, slog.Default())
 	if err == nil || !strings.Contains(err.Error(), "bootstrap open lighthouse") || !strings.Contains(err.Error(), path) {
 		t.Errorf("Connect = %v, want the re-bootstrap instructions", err)
 	}
@@ -120,7 +121,7 @@ func TestMissingSecrets(t *testing.T) {
 	c := start(t, f)
 	path := filepath.Join(t.TempDir(), "token")
 	os.WriteFile(path, []byte("cove_abc"), 0o600)
-	if err := Connect(context.Background(), c, path, time.Millisecond); err != nil {
+	if err := Connect(context.Background(), c, path, time.Millisecond, slog.Default()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -136,7 +137,7 @@ func TestUnreachableRetriesUntilCancelled(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	err := Connect(ctx, c, filepath.Join(t.TempDir(), "token"), 10*time.Millisecond)
+	err := Connect(ctx, c, filepath.Join(t.TempDir(), "token"), 10*time.Millisecond, slog.Default())
 	if err != context.DeadlineExceeded {
 		t.Errorf("Connect = %v, want it to keep retrying until the context ends", err)
 	}

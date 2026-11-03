@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/lsariol/blackboxlog"
 	"github.com/lsariol/coveclient"
 	"github.com/lsariol/lighthouse"
 	"github.com/lsariol/lighthouse/internal/cli"
@@ -87,28 +88,33 @@ Run "lighthouse help" to list the CLI commands.
 
 // runServe runs the daemon until SIGINT or SIGTERM (docker stop).
 func runServe(withShell bool) {
-	cfg := loadConfig()
+	// After Load: a local .env can set APP_ENV, which picks the log format.
+	cfg, err := config.Load()
+	log := newLogger(withShell)
+	slog.SetDefault(log)
+	if err != nil {
+		fatalLog(log, err)
+	}
 	if err := cfg.ValidateServe(); err != nil {
-		fatal(err)
+		fatalLog(log, err)
 	}
 
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 	version := buildVersion(cfg)
-	slog.Info("Lighthouse starting", "version", version, "env", cfg.Env)
+	log.Info("Lighthouse starting")
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	dockerClient, err := docker.New()
 	if err != nil {
-		fatal(err)
+		fatalLog(log, err)
 	}
 	defer dockerClient.Close()
 
 	d := daemon.New(cfg, version, dockerClient, compose.Runner{})
 
 	controlDone := make(chan error, 1)
-	go func() { controlDone <- control.Serve(ctx, cfg.ControlSocket, d) }()
+	go func() { controlDone <- control.Serve(ctx, cfg.ControlSocket, d, log.With("component", "control")) }()
 
 	if withShell {
 		shell := cli.New(d, cli.Options{Env: cfg.Env, Embedded: true})
@@ -119,12 +125,12 @@ func runServe(withShell bool) {
 	go func() {
 		defer close(loopDone)
 
-		db, orch, err := start(ctx, cfg, d, dockerClient)
+		db, orch, err := start(ctx, cfg, d, dockerClient, log)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
 			}
-			fatalServe(cfg, err)
+			fatalServe(cfg, log, err)
 		}
 		defer db.Close()
 
@@ -134,56 +140,56 @@ func runServe(withShell bool) {
 	select {
 	case err := <-controlDone:
 		if err != nil && ctx.Err() == nil {
-			fatal(err)
+			fatalLog(log, err)
 		}
 	case <-ctx.Done():
 	}
 
-	slog.Info("Lighthouse stopping")
+	log.Info("Lighthouse stopping")
 	select {
 	case <-loopDone:
 	case <-time.After(shutdownWait):
-		slog.Warn("a deploy was still running at shutdown")
+		log.Warn("a deploy was still running at shutdown")
 	}
 	<-controlDone
-	slog.Info("Lighthouse stopped")
+	log.Info("Lighthouse stopped")
 }
 
 // start connects to Cove and the database, migrates it, and hands the daemon
 // its store and orchestrator.
-func start(ctx context.Context, cfg config.Config, d *daemon.Daemon, dockerClient *docker.Client) (*database.Database, *orchestrator.Orchestrator, error) {
+func start(ctx context.Context, cfg config.Config, d *daemon.Daemon, dockerClient *docker.Client, log *slog.Logger) (*database.Database, *orchestrator.Orchestrator, error) {
 	rules, err := policy.Parse(lighthouse.PolicyFile)
 	if err != nil {
 		return nil, nil, err
 	}
 	if len(rules.Exceptions) > 0 {
-		slog.Info("deploy rule exceptions loaded", "exceptions", len(rules.Exceptions))
+		log.Info("deploy rule exceptions loaded", "exceptions", len(rules.Exceptions))
 	}
 	if _, err := os.Stat(cfg.StoragePath); err != nil {
-		slog.Warn("STORAGE_PATH isn't readable, so symlinks in the projects' data folders can't be checked: mount it read-only at the same path",
+		log.Warn("STORAGE_PATH isn't readable, so symlinks in the projects' data folders can't be checked: mount it read-only at the same path",
 			"path", cfg.StoragePath, "err", err)
 	}
 
 	coveClient := coveclient.New(cfg.CoveURL, "")
 
 	d.SetPhase(daemon.PhaseWaiting)
-	if err := cove.Connect(ctx, coveClient, cfg.CoveTokenPath, retryEvery); err != nil {
+	if err := cove.Connect(ctx, coveClient, cfg.CoveTokenPath, retryEvery, log.With("component", "cove")); err != nil {
 		return nil, nil, err
 	}
 	secrets, err := cove.ReadSecrets(ctx, coveClient)
 	if err != nil {
 		return nil, nil, err
 	}
-	slog.Info("secrets loaded from Cove", "github_token_length", len(secrets.GitHubToken))
+	log.Info("secrets loaded from Cove")
 
-	db, err := openDatabase(ctx, d, secrets)
+	db, err := openDatabase(ctx, d, secrets, log)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	self, err := dockerClient.SelfProject(ctx)
 	if err != nil {
-		slog.Warn("self-update is off: Lighthouse can't find its own container", "err", err)
+		log.Warn("self-update is off: Lighthouse can't find its own container", "err", err)
 	}
 	deployer := deploy.New(compose.Runner{}, dockerClient, github.Client{}, coveClient, deploy.Options{
 		Self:    self,
@@ -191,35 +197,37 @@ func start(ctx context.Context, cfg config.Config, d *daemon.Daemon, dockerClien
 		Storage: cfg.StoragePath,
 		Backups: cfg.BackupPath,
 		Policy:  rules,
-		Log:     os.Stderr,
+		Output:  os.Stderr,
+		Log:     log,
 	})
 	if self != "" {
-		slog.Info("self-update is on", "compose_project", self)
+		log.Info("self-update is on")
 	}
 	commits := github.Client{HTTP: &http.Client{Timeout: 30 * time.Second}}
-	orch := orchestrator.New(db, commits, deployer, dockerClient, secrets.GitHubToken)
+	orch := orchestrator.New(db, commits, deployer, dockerClient, secrets.GitHubToken, log)
 	if cfg.GitHubAppID == "" {
 		orch.SetPublisher(nil, "GITHUB_APP_ID isn't set (DOCUMENTATION.md §4.7)")
 	} else {
 		orch.SetPublisher(&github.App{ID: cfg.GitHubAppID, HTTP: commits.HTTP,
 			Key: func(ctx context.Context) ([]byte, error) { return cove.AppKey(ctx, coveClient) }}, "")
-		slog.Info("publishing GitHub Releases is on", "app_id", cfg.GitHubAppID)
+		log.Info("publishing GitHub Releases is on", "app_id", cfg.GitHubAppID)
 	}
 	d.Ready(db, orch, db)
 	orch.RecordHandOffs(ctx)
 	go orch.RunPublisher(ctx)
 
 	list, _ := db.List(ctx)
-	slog.Info("Lighthouse ready", "projects", len(list), "poll_interval", cfg.PollInterval.String(), "control_socket", cfg.ControlSocket)
+	log.Info("Lighthouse ready", "projects", len(list), "poll_interval", cfg.PollInterval.String(), "control_socket", cfg.ControlSocket)
 	return db, orch, nil
 }
 
 // openDatabase applies pending migrations as the migrator, then connects as
 // the app and checks the schema.
-func openDatabase(ctx context.Context, d *daemon.Daemon, secrets cove.Secrets) (*database.Database, error) {
+func openDatabase(ctx context.Context, d *daemon.Daemon, secrets cove.Secrets, log *slog.Logger) (*database.Database, error) {
+	log = log.With("component", "database")
 	for {
 		d.SetPhase(daemon.PhaseMigrating)
-		err := database.Migrate(ctx, secrets.MigratorDatabaseURL)
+		err := database.Migrate(ctx, secrets.MigratorDatabaseURL, log)
 		if err == nil {
 			var db *database.Database
 			db, err = database.Connect(ctx, secrets.DatabaseURL)
@@ -236,7 +244,7 @@ func openDatabase(ctx context.Context, d *daemon.Daemon, secrets cove.Secrets) (
 		}
 
 		d.SetPhase(daemon.PhaseDatabase)
-		slog.Warn("waiting for the database to be reachable", "err", err)
+		log.Warn("waiting for the database to be reachable", "err", err)
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -276,22 +284,24 @@ func runSelfUpdate(args []string) int {
 		fmt.Fprintln(os.Stderr, "Usage: lighthouse self-update <hand-off file>")
 		return 2
 	}
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	log := blackboxlog.New(blackboxlog.Options{})
+	slog.SetDefault(log)
 	dockerClient, err := docker.New()
 	if err != nil {
-		fatal(err)
+		fatalLog(log, err)
 	}
 	defer dockerClient.Close()
 
 	deployer := deploy.New(compose.Runner{}, dockerClient, nil, nil, deploy.Options{
-		Root: filepath.Dir(filepath.Dir(args[0])),
-		Log:  os.Stderr,
+		Root:   filepath.Dir(filepath.Dir(args[0])),
+		Output: os.Stderr,
+		Log:    log,
 	})
 	if err := deployer.FinishHandOff(context.Background(), args[0]); err != nil {
-		slog.Error("self-update failed", "err", err)
+		log.Error("self-update failed", "err", err)
 		return 1
 	}
-	slog.Info("self-update finished: the new Lighthouse is healthy")
+	log.Info("self-update finished: the new Lighthouse is healthy")
 	return 0
 }
 
@@ -311,17 +321,16 @@ func runCommand(args []string) int {
 }
 
 // adminSecrets reads Lighthouse's secrets from Cove for `lighthouse migrate`.
-func adminSecrets(ctx context.Context, cfg config.Config) cove.Secrets {
+func adminSecrets(ctx context.Context, cfg config.Config, log *slog.Logger) cove.Secrets {
 	if err := cfg.ValidateCove(); err != nil {
 		fatal(err)
 	}
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	c := coveclient.New(cfg.CoveURL, "")
-	if err := cove.Connect(ctx, c, cfg.CoveTokenPath, 5*time.Second); err != nil {
+	if err := cove.Connect(ctx, c, cfg.CoveTokenPath, 5*time.Second, log); err != nil {
 		fatal(fmt.Errorf("connecting to Cove: %w", err))
 	}
 	secrets, err := cove.ReadSecrets(ctx, c)
@@ -342,12 +351,15 @@ func runMigrate(args []string) {
 		os.Exit(1)
 	}
 
+	cfg := loadConfig()
+	log := blackboxlog.New(blackboxlog.Options{Format: blackboxlog.Text})
+
 	ctx := context.Background()
-	secrets := adminSecrets(ctx, loadConfig())
+	secrets := adminSecrets(ctx, cfg, log)
 
 	var err error
 	if command == "up" {
-		err = database.Migrate(ctx, secrets.MigratorDatabaseURL)
+		err = database.Migrate(ctx, secrets.MigratorDatabaseURL, log)
 	} else {
 		err = database.PrintMigrationStatus(ctx, secrets.MigratorDatabaseURL, os.Stdout)
 	}
@@ -380,15 +392,30 @@ func buildVersion(cfg config.Config) string {
 	return "dev"
 }
 
-// fatal prints an error and exits.
+// newLogger returns the daemon's logger: Blackbox's format, or readable text
+// when it shares a terminal with the CLI.
+func newLogger(terminal bool) *slog.Logger {
+	if terminal {
+		return blackboxlog.New(blackboxlog.Options{Format: blackboxlog.Text})
+	}
+	return blackboxlog.New(blackboxlog.Options{})
+}
+
+// fatal prints an error and exits, for commands run by hand.
 func fatal(err error) {
 	fmt.Fprintf(os.Stderr, "lighthouse: %v\n", err)
 	os.Exit(1)
 }
 
-// fatalServe is fatal for the daemon once its control socket is open: it
+// fatalLog is fatal for what runs under Docker: the reason is logged at ERROR.
+func fatalLog(log *slog.Logger, err error) {
+	log.Error("Lighthouse can't run", "err", err)
+	os.Exit(1)
+}
+
+// fatalServe is fatalLog for the daemon once its control socket is open: it
 // removes the socket so the next start doesn't find a stale one.
-func fatalServe(cfg config.Config, err error) {
+func fatalServe(cfg config.Config, log *slog.Logger, err error) {
 	os.Remove(cfg.ControlSocket)
-	fatal(err)
+	fatalLog(log, err)
 }
