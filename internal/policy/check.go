@@ -108,7 +108,7 @@ type service struct {
 	EnvFile           []pathItem        `json:"env_file"`
 	Build             *build            `json:"build"`
 	ContainerName     string            `json:"container_name"`
-	Labels            map[string]string `json:"labels"`
+	Labels            labels            `json:"labels"`
 	Networks          map[string]*struct {
 		Aliases []string `json:"aliases"`
 	} `json:"networks"`
@@ -166,6 +166,27 @@ func (f *flexString) UnmarshalJSON(b []byte) error {
 		return nil
 	}
 	*f = flexString(strings.TrimSpace(string(b)))
+	return nil
+}
+
+// labels are a service's labels, written as a map or a list of key=value.
+type labels map[string]string
+
+func (l *labels) UnmarshalJSON(b []byte) error {
+	var list []string
+	if json.Unmarshal(b, &list) == nil {
+		*l = make(labels, len(list))
+		for _, item := range list {
+			key, value, _ := strings.Cut(item, "=")
+			(*l)[key] = value
+		}
+		return nil
+	}
+	var m map[string]string
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	*l = m
 	return nil
 }
 

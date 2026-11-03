@@ -319,3 +319,16 @@ func TestSummary(t *testing.T) {
 		t.Errorf("Summary = %q", s)
 	}
 }
+
+func TestLabelsWrittenAsAList(t *testing.T) {
+	s := newSetup(t)
+	good := []string{"com.example.flag", "com.mobasity.public-url=https://plop.mobasity.com"}
+	if got := ids(s.check(t, cfg(t, map[string]any{"labels": good}, nil))); len(got) != 0 {
+		t.Errorf("findings %v, want none", got)
+	}
+	bad := []string{"com.mobasity.public-url=plop.mobasity.com"}
+	got := ids(s.check(t, cfg(t, map[string]any{"labels": bad}, nil)))
+	if !slices.Equal(got, []string{"label:com.mobasity.public-url"}) {
+		t.Errorf("findings %v, want label:com.mobasity.public-url", got)
+	}
+}
