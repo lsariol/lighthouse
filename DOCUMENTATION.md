@@ -5,6 +5,7 @@ The reference for **Lighthouse**, the self-hosted deployer behind every project 
 - [README](README.md): a short, friendly overview.
 - [Cove](https://github.com/LSariol/Cove): the secret vault Lighthouse reads from. Its `DOCUMENTATION.md` §9 (connecting a project), §10 (bootstrap) and §14 (operations) are the other half of this document.
 - [CoveClient](https://github.com/LSariol/CoveClient): the Go library Lighthouse uses to talk to Cove.
+- [blackboxlog](https://github.com/lsariol/blackboxlog): the logging standard Lighthouse follows, so Blackbox can read its logs.
 
 This document describes the latest release (`CHANGELOG.md` lists each version). Sections 1–13 are how Lighthouse works, section 14 the standards every change follows, section 15 its known limits and accepted risks, section 16 what may come later. The history of how it got here is in git and `CHANGELOG.md`.
 
@@ -185,8 +186,8 @@ main ─► cove ─► CoveClient
 
 ### 4.1 Startup (`lighthouse serve`)
 
-1. **Config.** `config.Load` reads the environment, plus a `.env` file if one exists (local development only: `APP_ENV_PATH`, else `./.env`). `ValidateServe` stops startup when a required setting is missing, `COVE_URL` has no scheme, the poll interval is under 5 s, or `STAGING_PATH` is `/`, `.` or a system folder. Every startup error is one line, `lighthouse: <message>`, with exit status 1.
-2. **Logging.** `log/slog` text lines with timestamps on stderr (`docker logs lighthouse`), plus each deploy step's output, prefixed `[<project> <step>]`.
+1. **Config.** `config.Load` reads the environment, plus a `.env` file if one exists (local development only: `APP_ENV_PATH`, else `./.env`). `ValidateServe` stops startup when a required setting is missing, `COVE_URL` has no scheme, the poll interval is under 5 s, or `STAGING_PATH` is `/`, `.` or a system folder. Every startup error is one `ERROR` log line, `Lighthouse can't run`, with the reason in `err` and exit status 1.
+2. **Logging.** One JSON record per line on stderr (`docker logs lighthouse`), through `blackboxlog`; readable text with `APP_ENV=dev`, in a local run with the CLI, and for `lighthouse migrate`. `project` names the project a line is about, and `component` the part of Lighthouse that wrote it. `ERROR` means someone should look; a failure that's tried again by itself is `WARN`. Each deploy step's output is written as it runs, prefixed `[<project> <step>]`: it isn't a log record, so Blackbox stores it with level `unknown`.
 3. **Docker client** from the environment (`/var/run/docker.sock`); the API version is negotiated.
 4. **Control socket.** The CLI can connect from here on; `status` shows the startup phase, and everything else answers "still starting".
 5. **Cove** (phase `waiting for Cove`), retried until it works:
@@ -375,7 +376,9 @@ All settings are environment variables; Lighthouse's secrets (the GitHub token, 
 | `STAGING_PATH` | Yes | The deploy folders: `<compose project>/<commit>`, the running version and the one before it. Lighthouse owns everything in it, so it can't be `/`, `.` or a system folder. **In Docker it must be mounted at the same path on the host and in the container** (`/srv/server/staging`), so a relative bind mount in a project's compose file means the same files to Compose and to Docker |
 | `STORAGE_PATH` | No | The projects' data folders, default `/srv/server/storage`: a project may mount host paths from `<STORAGE_PATH>/<compose project>/` ([§7.1](#71-the-deploy-rules)). **In Docker, mount it read-only at the same path**, so the rules can follow a symlink a container left in its folder; without it, Lighthouse logs a warning at startup |
 | `BACKUP_PATH` | No | Database backups taken before a deploy (`x-lighthouse` `backup: postgres`), default `/srv/backups`: `<compose project>/<project>-<time>-<commit>.sql.gz`. **In Docker, mount it at the same path** (read-write) |
-| `APP_ENV` | No | `dev` or `prod`, shown in the shell's prompt (`lighthouse (prod)>`, prod in red) and by `status` |
+| `APP_ENV` | No | `dev` or `prod`, shown in the shell's prompt (`lighthouse (prod)>`, prod in red) and by `status`. `dev` also makes the logs readable text |
+| `LOG_FORMAT` | No | `json` or `text`. Default `json`, or `text` with `APP_ENV=dev` |
+| `LOG_LEVEL` | No | `debug`, `info`, `warn` or `error`. Default `info` |
 | `LIGHTHOUSE_VERSION` | No | The version `status` and `version` report. Set in the compose file at release; without it, `dev` (plus the commit for a local build) |
 | `LIGHTHOUSE_POLL_INTERVAL` | No | How often GitHub is checked, e.g. `30s`, `1m`. Default `10s`, minimum `5s` |
 | `LIGHTHOUSE_CONTROL_SOCKET` | No | Where the daemon listens for the CLI. Default `/run/lighthouse/control.sock` (inside the container; not mounted) |
@@ -859,16 +862,16 @@ Each deploy cleans up after itself: deploy folders other than the running versio
 
 | Symptom | Cause and fix |
 |---|---|
-| `lighthouse: COVE_URL, … are not set` | The compose `environment:` lost lines; compare with the repository's `docker-compose.yml` |
-| `lighthouse: STAGING_PATH "/srv/server": isn't a dedicated folder` | Lighthouse owns everything in it; point it at a folder only Lighthouse uses |
+| `COVE_URL, … are not set` | The compose `environment:` lost lines; compare with the repository's `docker-compose.yml` |
+| `STAGING_PATH "/srv/server": isn't a dedicated folder` | Lighthouse owns everything in it; point it at a folder only Lighthouse uses |
 | `waiting for a Cove token: run "bootstrap open lighthouse"` repeating | No token file and Cove's bootstrap is closed. Open it in Cove |
 | `waiting for Cove to be reachable` repeating | Cove is down or not on `spark`. `docker ps` for `cove`; both containers on `spark` |
-| `lighthouse: Cove rejected Lighthouse's token` (restarting) | The token was rotated or revoked. Delete the token file, `bootstrap open lighthouse`, restart |
-| `lighthouse: Lighthouse's secrets aren't all in Cove (… missing: KEY…)` | Create the named keys in Cove ([§10.1](#101-database-setup-once-by-hand) for the database URLs), restart |
+| `Cove rejected Lighthouse's token` (restarting) | The token was rotated or revoked. Delete the token file, `bootstrap open lighthouse`, restart |
+| `Lighthouse's secrets aren't all in Cove (… missing: KEY…)` | Create the named keys in Cove ([§10.1](#101-database-setup-once-by-hand) for the database URLs), restart |
 | `waiting for the database to be reachable` repeating; `status` says `waiting for the database` | sparkdb is down or Lighthouse isn't on `spark`. `docker ps` for `sparkdb`. It continues by itself once sparkdb answers |
-| `lighthouse: … password authentication failed for user "lighthouse_…"` | The URL in Cove doesn't match the role's password. Reset the role from the URL ([§10.1](#101-database-setup-once-by-hand) step 4), restart |
-| `lighthouse: the database schema is at version N, but this Lighthouse needs M` | Migrations didn't run: check `LIGHTHOUSE_MIGRATOR_DATABASE_URL` logs in as `lighthouse_migrator`; `lh migrate status` shows which are missing |
-| `lighthouse: apply migrations: …` | A migration failed; nothing after it ran. The message names it. Usually a missing role or grant from §10.1: rerun `setup.sql` |
+| `… password authentication failed for user "lighthouse_…"` | The URL in Cove doesn't match the role's password. Reset the role from the URL ([§10.1](#101-database-setup-once-by-hand) step 4), restart |
+| `the database schema is at version N, but this Lighthouse needs M` | Migrations didn't run: check `LIGHTHOUSE_MIGRATOR_DATABASE_URL` logs in as `lighthouse_migrator`; `lh migrate status` shows which are missing |
+| `apply migrations: …` | A migration failed; nothing after it ran. The message names it. Usually a missing role or grant from §10.1: rerun `setup.sql` |
 | A deploy fails at `check`: `the compose file breaks the deploy rules (…)` | `lh report <name>` lists each finding with its ID. Fix the compose file, or, if the project really needs it, add an exception to `policy.json` ([§7.1](#71-the-deploy-rules)) |
 | A deploy fails at `test`: `<service>'s tests failed` | The Dockerfile's `test` stage failed; `lh report <name>` shows its output |
 | `lighthouse-updater` is still running, or a self-update never finished | `docker logs lighthouse-updater` says where it is. A hand-off unfinished after 30 minutes is recorded as failed; the next update removes the helper |

@@ -2,6 +2,17 @@
 
 All notable changes to Lighthouse. Versions follow [semantic versioning](https://semver.org).
 
+## v1.4.0 (2026-11-02)
+
+Lighthouse's logs follow Spark's logging standard, so Blackbox can read their levels and fields.
+
+### Changed
+- **`docker logs lighthouse` is JSON:** one record per line, through `blackboxlog`. `LOG_FORMAT=text` or `APP_ENV=dev` gives readable lines, `LOG_LEVEL` sets the level, and a local run with the CLI stays readable. Each deploy step's output is unchanged, as plain `[<project> <step>]` lines.
+- **`ERROR` now means someone should look:** a failed check or deploy that's tried again by itself is `WARN`, a project marked broken is `ERROR` instead of `WARN`, and a self-update that failed is `ERROR` instead of `INFO`.
+- **A startup failure is an `ERROR` record:** `Lighthouse can't run`, with the reason in `err`, so it shows up in a search by level. It used to be a plain `lighthouse: …` line.
+- **One failure, one line:** a failed deploy is no longer logged again as a failed check and a failed scan.
+- **Standard fields:** `component` says which part of Lighthouse wrote a line, `deploy finished` and `deploy failed` carry `outcome` and `duration_ms`, and `migration applied` has `duration_ms` instead of `took`. Lines no longer carry Lighthouse's own version, environment or compose project, which Blackbox reads from Docker, and the GitHub token's length is gone.
+
 ## v1.3.1 (2026-11-02)
 
 Lighthouse can now deploy Blackbox, Spark's central log store.
