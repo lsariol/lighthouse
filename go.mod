@@ -1,6 +1,6 @@
 module github.com/lsariol/lighthouse
 
-go 1.27.1
+go 1.27.3
 
 require (
 	github.com/containerd/errdefs v1.0.0

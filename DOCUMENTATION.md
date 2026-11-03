@@ -154,7 +154,7 @@ scripts/
   db/                      Admin SQL for sparkdb, run by hand (§10.1); test-db.sh uses it too
   test-db.sh               A throwaway Postgres for the integration tests (§13.1)
   e2e-self-update.sh       The self-update end to end against the local Docker (§4.6)
-Dockerfile                 golang:1.27.1-alpine → alpine:3.24 + docker-cli, compose, buildx;
+Dockerfile                 golang:1.27.3-alpine → alpine:3.24 + docker-cli, compose, buildx;
                            a test stage (gofmt, vet, tests with -race) that every deploy of Lighthouse runs
 docker-compose.yml         Lighthouse's own service: mounts, healthcheck, x-lighthouse
 ```
@@ -924,7 +924,7 @@ What protects what, and what is left to you. The risks accepted on purpose are i
 
 ### 13.1 Running locally
 
-Needs Go 1.27.1 and Docker. On Windows, run the commands in PowerShell or Git Bash from the repository folder.
+Needs Go 1.27.3 and Docker. On Windows, run the commands in PowerShell or Git Bash from the repository folder.
 
 ```bash
 cp .env.example .env        # point COVE_URL at your dev Cove; it holds the dev database URLs
@@ -953,7 +953,7 @@ scripts/e2e-self-update.sh       # optional: the self-update end to end against 
 
 On Windows, run these in Git Bash. Without the test database, the integration tests in `internal/database` are skipped and everything else still runs. They run against real Postgres (never sparkdb), over TCP, so passwords and grants are really checked.
 
-**The Go version is pinned in two places, kept equal:** `go 1.27.1` in `go.mod` and `golang:1.27.1-alpine` in the `Dockerfile`. Bump both in one commit.
+**The Go version is pinned in two places, kept equal:** `go 1.27.3` in `go.mod` and `golang:1.27.3-alpine` in the `Dockerfile`. Bump both in one commit.
 
 ---
 
