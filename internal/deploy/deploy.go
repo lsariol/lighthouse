@@ -32,7 +32,7 @@ type Compose interface {
 	Build(ctx context.Context, dir string, project string, env []string, out io.Writer) error
 	BuildStage(ctx context.Context, buildContext string, dockerfile string, target string, out io.Writer) error
 	Exec(ctx context.Context, container string, command []string, stdout io.Writer) error
-	RunDetached(ctx context.Context, name string, image string, volumes []string, command []string) error
+	RunDetached(ctx context.Context, name string, image string, volumes []string, env []string, command []string) error
 	RemoveContainer(ctx context.Context, name string) error
 	Up(ctx context.Context, dir string, project string, env []string, out io.Writer) error
 }
@@ -203,6 +203,7 @@ type run struct {
 	settings    settings.Settings
 	started     time.Time
 	fallbackDir string
+	fallbackEnv []string // the secrets a rollback into fallbackDir needs
 	dry         bool
 }
 
@@ -316,8 +317,8 @@ func (r *run) deploy(ctx context.Context) Result {
 		r.removeUnlessCurrent(dir)
 		return fail(StepSecrets, f)
 	}
-	secrets := len(env)
-	env = append(env, deployVars(r.req.SHA, r.req.Version)...)
+	secrets := env
+	env = append(append([]string{}, env...), deployVars(r.req.SHA, r.req.Version)...)
 
 	if f := r.step(ctx, StepBuild, func(ctx context.Context, out io.Writer) *failure {
 		return r.build(ctx, dir, project, env, out)
@@ -789,13 +790,14 @@ func (r *run) rollBack(ctx context.Context, res Result, project compose.Project,
 		return res
 	}
 
+	prevEnv := r.prevEnv
 	switch {
 	case len(r.previous) == 0:
 		return note("nothing ran before, so there's nothing to roll back to")
 	case (prevSHA == "" || prevDir == "") && r.fallbackDir == "":
 		return note("the previous version's files aren't kept (it wasn't deployed by this Lighthouse), so it wasn't restored automatically")
 	case prevDir == "":
-		prevDir = r.fallbackDir
+		prevDir, prevEnv = r.fallbackDir, r.fallbackEnv
 	}
 	what := short(prevSHA)
 	if what == "" {
@@ -811,7 +813,7 @@ func (r *run) rollBack(ctx context.Context, res Result, project compose.Project,
 				}
 			}
 		}
-		env := r.prevEnv
+		env := prevEnv
 		if env == nil {
 			var f *failure
 			if env, f = r.fetchSecretsFor(ctx, prevDir, out); f != nil {

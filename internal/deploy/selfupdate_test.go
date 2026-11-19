@@ -58,13 +58,89 @@ func TestSelfDeployHandsOff(t *testing.T) {
 	}
 }
 
-func TestSelfDeployRefusesSecrets(t *testing.T) {
+// newSelfEnvWithSecret is newSelfEnv with one secret, and a previous version
+// running from a folder this Lighthouse keeps.
+func newSelfEnvWithSecret(t *testing.T) (*env, projects.Project) {
 	e := newSelfEnv(t)
-	e.compose.vars = []compose.Variable{{Name: "LIGHTHOUSE_GITHUB_TOKEN"}}
-	e.secrets.values["LIGHTHOUSE_GITHUB_TOKEN"] = "ghp_xxxx"
-	res := e.d.Deploy(context.Background(), Request{Project: lighthouse, SHA: sha1})
-	if res.FailedStep != StepHandOff || !strings.Contains(res.Err.Error(), "can't use secrets") || len(e.compose.helpers) != 0 {
-		t.Errorf("Deploy = step %s, %v, helpers %v", res.FailedStep, res.Err, e.compose.helpers)
+	e.compose.vars = append(e.compose.vars, compose.Variable{Name: "LIGHTHOUSE_API_TOKEN"})
+	e.secrets.values["LIGHTHOUSE_API_TOKEN"] = "tok-new-1234"
+	p := lighthouse
+	p.DeployedSHA = sha1
+	os.MkdirAll(filepath.Join(e.root, "lighthouse", sha1[:12]), 0o755)
+	e.docker.set("lighthouse", "lighthouse", "lh-old", "img-old", healthy)
+	return e, p
+}
+
+// The hand-off names the secrets; their values reach the helper only in its
+// environment, the previous version's too.
+func TestSelfDeployCarriesSecrets(t *testing.T) {
+	e, p := newSelfEnvWithSecret(t)
+	res := e.d.Deploy(context.Background(), Request{Project: p, SHA: sha2})
+	if !res.HandedOff || res.Err != nil {
+		t.Fatalf("Deploy = %+v", res)
+	}
+	env := e.compose.helperEnv[0]
+	if !slices.Contains(env, SecretPrefix+"LIGHTHOUSE_API_TOKEN=tok-new-1234") || !slices.Contains(env, PreviousSecretPrefix+"LIGHTHOUSE_API_TOKEN=tok-new-1234") || len(env) != 2 {
+		t.Errorf("the helper's environment: %v", env)
+	}
+	path := filepath.Join(e.root, ".self-update", sha2[:12]+".json")
+	data, _ := os.ReadFile(path)
+	if strings.Contains(string(data), "tok-new-1234") {
+		t.Error("a secret value is in the hand-off file")
+	}
+	h, err := readHandOff(path)
+	if err != nil || !slices.Equal(h.Secrets, []string{"LIGHTHOUSE_API_TOKEN"}) || !slices.Equal(h.PreviousSecrets, []string{"LIGHTHOUSE_API_TOKEN"}) {
+		t.Errorf("hand-off secrets %v, previous %v, %v", h.Secrets, h.PreviousSecrets, err)
+	}
+}
+
+// The helper swaps with the new values, and a rollback starts the previous
+// version with its own.
+func TestHelperUsesTheSecrets(t *testing.T) {
+	e, p := newSelfEnvWithSecret(t)
+	e.d.Deploy(context.Background(), Request{Project: p, SHA: sha2})
+	t.Setenv(SecretPrefix+"LIGHTHOUSE_API_TOKEN", "tok-new-1234")
+	t.Setenv(PreviousSecretPrefix+"LIGHTHOUSE_API_TOKEN", "tok-old-5678")
+	e.compose.up = func(dir string) {
+		if filepath.Base(dir) == sha2[:12] {
+			e.docker.set("lighthouse", "lighthouse", "lh-new", "img-new", docker.Detail{State: "running", Health: "unhealthy", RestartPolicy: "unless-stopped"})
+		} else {
+			e.docker.set("lighthouse", "lighthouse", "lh-old", "img-old", healthy)
+		}
+	}
+	e.d.FinishHandOff(context.Background(), filepath.Join(e.root, ".self-update", sha2[:12]+".json"))
+	if len(e.compose.upEnv) != 2 || !slices.Contains(e.compose.upEnv[0], "LIGHTHOUSE_API_TOKEN=tok-new-1234") || !slices.Contains(e.compose.upEnv[1], "LIGHTHOUSE_API_TOKEN=tok-old-5678") {
+		t.Errorf("swap and rollback environments: %v", e.compose.upEnv)
+	}
+	if ready, _ := e.d.HandOffs(); len(ready) != 1 || ready[0].Status != projects.StatusRolledBack {
+		t.Fatalf("HandOffs = %+v", ready)
+	}
+	if len(e.secrets.asked) != 2 {
+		t.Errorf("the helper asked Cove: %v", e.secrets.asked)
+	}
+}
+
+// A helper started without its secrets changes nothing.
+func TestHelperWithoutItsSecrets(t *testing.T) {
+	e, p := newSelfEnvWithSecret(t)
+	e.d.Deploy(context.Background(), Request{Project: p, SHA: sha2})
+	err := e.d.FinishHandOff(context.Background(), filepath.Join(e.root, ".self-update", sha2[:12]+".json"))
+	if err == nil || !strings.Contains(err.Error(), "LIGHTHOUSE_API_TOKEN") || len(e.compose.ups) != 0 {
+		t.Errorf("FinishHandOff = %v, ups %v", err, e.compose.ups)
+	}
+	if ready, _ := e.d.HandOffs(); len(ready) != 1 || ready[0].Status != projects.StatusFailed || ready[0].FailedStep != StepHandOff {
+		t.Errorf("HandOffs = %+v", ready)
+	}
+}
+
+// Without the previous version's secrets a rollback couldn't start it, so
+// the update waits and is tried again.
+func TestSelfDeployWaitsForThePreviousSecrets(t *testing.T) {
+	e, p := newSelfEnvWithSecret(t)
+	e.secrets.err, e.secrets.failOn = errors.New("Cove: connection refused"), 2
+	res := e.d.Deploy(context.Background(), Request{Project: p, SHA: sha2})
+	if res.HandedOff || res.FailedStep != StepHandOff || res.FailureKind != projects.FailureTransient || len(e.compose.helpers) != 0 {
+		t.Errorf("Deploy = %+v, helpers %v", res, e.compose.helpers)
 	}
 }
 
@@ -101,11 +177,15 @@ func TestHelperSwapsAndVerifies(t *testing.T) {
 	if d.SHA != sha2 || d.Trigger != projects.TriggerManual || !strings.Contains(strings.Join(names, " "), "build backup handoff swap verify cleanup") {
 		t.Errorf("deployment %+v, steps %v", d, names)
 	}
+	removed := len(e.compose.removed)
 	if err := e.d.Forget(ready[0]); err != nil {
 		t.Fatal(err)
 	}
 	if ready, _ := e.d.HandOffs(); len(ready) != 0 {
 		t.Error("forgotten, but still there")
+	}
+	if len(e.compose.removed) != removed+1 || e.compose.removed[removed] != HelperName {
+		t.Errorf("after a successful update, removed %v; want the helper", e.compose.removed)
 	}
 	if err := e.d.FinishHandOff(context.Background(), path); err == nil {
 		t.Error("finishing a forgotten hand-off worked")
@@ -137,6 +217,11 @@ func TestHelperRollsBack(t *testing.T) {
 	}
 	if last := e.compose.ups[len(e.compose.ups)-1]; filepath.Base(last) != sha1[:12] || e.docker.tags["lighthouse-lighthouse"] != "img-old" {
 		t.Errorf("rolled back in %s, image %q", last, e.docker.tags["lighthouse-lighthouse"])
+	}
+	removed := len(e.compose.removed)
+	e.d.Forget(ready[0])
+	if len(e.compose.removed) != removed {
+		t.Error("a failed update's helper was removed: its logs say why it failed")
 	}
 }
 

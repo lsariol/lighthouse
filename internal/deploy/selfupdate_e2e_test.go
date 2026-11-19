@@ -17,7 +17,8 @@ import (
 // TestRealSelfUpdate runs a whole self-update against real Docker: a project
 // built FROM the Lighthouse image hands off to the real update helper, which
 // swaps it; then a version that never becomes healthy is handed off and must
-// be rolled back.
+// be rolled back. Each version reads a secret under its own key, so the
+// rollback must give the previous version its own.
 func TestRealSelfUpdate(t *testing.T) {
 	base := os.Getenv("LIGHTHOUSE_E2E_SELF_UPDATE")
 	if base == "" {
@@ -29,7 +30,7 @@ func TestRealSelfUpdate(t *testing.T) {
 	const project = "lhselftest"
 	root := "/tmp/lhtest/staging"
 	os.RemoveAll(root)
-	files := func(healthy bool) map[string]string {
+	files := func(healthy bool, key string) map[string]string {
 		check := `["CMD", "/lighthouse", "health"]`
 		if !healthy {
 			check = `["CMD", "false"]`
@@ -46,6 +47,7 @@ services:
       - COVE_TOKEN_PATH=/tmp/token
       - STAGING_PATH=/tmp/staging
       - LIGHTHOUSE_VERSION=${LIGHTHOUSE_DEPLOY_VERSION:-dev}
+      - E2E_TOKEN=${` + key + `}
     healthcheck:
       test: ` + check + `
       interval: 1s
@@ -73,19 +75,22 @@ services:
 
 	source := &fakeSource{}
 	var log bytes.Buffer
-	dep := New(runner, d, source, &fakeSecrets{}, Options{
+	secrets := &fakeSecrets{values: map[string]string{"LHSELFTEST_TOKEN": "e2e-secret-one", "LHSELFTEST_TOKEN_TWO": "e2e-secret-two"}}
+	dep := New(runner, d, source, secrets, Options{
 		Root: root, Self: project, Output: &log, Poll: 500 * time.Millisecond,
 		Timeouts: Timeouts{Verify: 60 * time.Second, Stable: 2 * time.Second},
 	})
 	p := projects.Project{Name: project, Repo: landing.Repo}
 
-	running := func() string {
-		out, _ := exec.Command("docker", "exec", project+"-app-1", "printenv", "LIGHTHOUSE_VERSION").Output()
+	printenv := func(name string) string {
+		out, _ := exec.Command("docker", "exec", project+"-app-1", "printenv", name).Output()
 		return strings.TrimSpace(string(out))
 	}
-	finish := func(sha string, version string, healthy bool) HandOff {
+	running := func() string { return printenv("LIGHTHOUSE_VERSION") }
+	helperExists := func() bool { return exec.Command("docker", "inspect", HelperName).Run() == nil }
+	finish := func(sha string, version string, healthy bool, key string) HandOff {
 		t.Helper()
-		source.archive = tarball(t, files(healthy))
+		source.archive = tarball(t, files(healthy, key))
 		res := dep.Deploy(ctx, Request{Project: p, SHA: sha, Version: version, Trigger: projects.TriggerCheck})
 		if !res.HandedOff {
 			t.Fatalf("Deploy %s = %+v\n%s", version, res, log.String())
@@ -105,25 +110,37 @@ services:
 			logs, _ := exec.Command("docker", "logs", HelperName).CombinedOutput()
 			t.Fatalf("HandOffs = %+v, %v\nhelper:\n%s", ready, err, logs)
 		}
-		dep.Forget(ready[0])
+		if data, _ := os.ReadFile(ready[0].Path); strings.Contains(string(data), "e2e-secret") {
+			t.Error("a secret value is in the hand-off file")
+		}
 		if label, _ := exec.Command("docker", "inspect", "-f", `{{index .Config.Labels "com.docker.compose.project"}}`, HelperName).Output(); strings.TrimSpace(string(label)) != "" {
 			t.Errorf("the helper is labelled as compose project %q", strings.TrimSpace(string(label)))
 		}
+		if logs, _ := exec.Command("docker", "logs", HelperName).CombinedOutput(); strings.Contains(string(logs), "e2e-secret") {
+			t.Errorf("a secret value is in the helper's output:\n%s", logs)
+		}
+		dep.Forget(ready[0])
 		return ready[0]
 	}
-	h := finish(sha1, "v1.0.0", true)
-	if h.Status != projects.StatusSucceeded || running() != "v1.0.0" {
+	h := finish(sha1, "v1.0.0", true, "LHSELFTEST_TOKEN")
+	if h.Status != projects.StatusSucceeded || running() != "v1.0.0" || printenv("E2E_TOKEN") != "e2e-secret-one" {
 		logs, _ := exec.Command("docker", "logs", HelperName).CombinedOutput()
 		t.Fatalf("v1: %s (%s), running %q\nhelper:\n%s", h.Status, h.Error, running(), logs)
 	}
+	if helperExists() {
+		t.Error("the helper of a successful update is still there, with the secrets it was given")
+	}
 	p.DeployedSHA, p.DeployedVersion = sha1, "v1.0.0"
 
-	h = finish(sha2, "v2.0.0", false)
+	h = finish(sha2, "v2.0.0", false, "LHSELFTEST_TOKEN_TWO")
 	if h.Status != projects.StatusRolledBack || h.FailedStep != StepVerify {
 		logs, _ := exec.Command("docker", "logs", HelperName).CombinedOutput()
 		t.Fatalf("v2: %s at %s (%s)\nhelper:\n%s", h.Status, h.FailedStep, h.Error, logs)
 	}
-	if running() != "v1.0.0" {
-		t.Errorf("after the rollback, running %q", running())
+	if running() != "v1.0.0" || printenv("E2E_TOKEN") != "e2e-secret-one" {
+		t.Errorf("after the rollback, running %q with E2E_TOKEN %q", running(), printenv("E2E_TOKEN"))
+	}
+	if !helperExists() {
+		t.Error("the helper of a failed update is gone, and its logs with it")
 	}
 }

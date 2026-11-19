@@ -12,7 +12,7 @@ services:
       dockerfile: Dockerfile
     container_name: lighthouse
     environment:
-      # No secrets here: Lighthouse reads its own from Cove, and the update helper can't keep any.
+      # No secrets here: Lighthouse reads its own from Cove.
       - APP_ENV=prod
       - LIGHTHOUSE_VERSION=${LIGHTHOUSE_DEPLOY_VERSION:-dev}
       - COVE_URL=http://cove:2100

@@ -20,8 +20,9 @@ func TestPolicyFileLoads(t *testing.T) {
 }
 
 // Lighthouse deploys itself: its own compose file must pass the deploy
-// rules with the exceptions policy.json gives it, need no secrets (the
-// update helper couldn't keep them), and deploy releases.
+// rules with the exceptions policy.json gives it, and deploy releases. It
+// needs no secrets yet: the Lighthouse running now, which deploys this
+// version, may be one whose update helper can't carry them.
 func TestOwnComposeFileDeploys(t *testing.T) {
 	if err := exec.Command("docker", "compose", "version").Run(); err != nil {
 		t.Skip("docker compose isn't installed")
@@ -39,7 +40,7 @@ func TestOwnComposeFileDeploys(t *testing.T) {
 	}
 	for _, v := range vars {
 		if v.Default == "" {
-			t.Errorf("docker-compose.yml needs ${%s} from Cove; Lighthouse's own compose file can't use secrets", v.Name)
+			t.Errorf("docker-compose.yml needs ${%s} from Cove; the Lighthouse deploying it may not be able to hand secrets to its update helper", v.Name)
 		}
 	}
 

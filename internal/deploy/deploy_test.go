@@ -69,11 +69,14 @@ type fakeSecrets struct {
 	values map[string]string
 	err    error
 	asked  []string
+	calls  int
+	failOn int // fails only this call (1 is the first), with err
 }
 
 func (f *fakeSecrets) GetSecretsContext(ctx context.Context, keys ...string) (map[string]string, error) {
 	f.asked = append(f.asked, keys...)
-	if f.err != nil {
+	f.calls++
+	if f.err != nil && (f.failOn == 0 || f.failOn == f.calls) {
 		return nil, f.err
 	}
 	out := map[string]string{}
@@ -95,12 +98,14 @@ type fakeCompose struct {
 	config   string
 	stageErr error
 
-	stages  []string
-	helpers []string
-	runErr  error
-	execs   []string
-	dump    string
-	execErr error
+	stages    []string
+	helpers   []string
+	helperEnv [][]string
+	removed   []string
+	runErr    error
+	execs     []string
+	dump      string
+	execErr   error
 
 	mu     sync.Mutex
 	builds []string
@@ -137,14 +142,20 @@ func (f *fakeCompose) Exec(ctx context.Context, container string, command []stri
 	return f.execErr
 }
 
-func (f *fakeCompose) RunDetached(ctx context.Context, name string, image string, volumes []string, command []string) error {
+func (f *fakeCompose) RunDetached(ctx context.Context, name string, image string, volumes []string, env []string, command []string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.helpers = append(f.helpers, name+" "+image+" "+strings.Join(command, " "))
+	f.helperEnv = append(f.helperEnv, env)
 	return f.runErr
 }
 
-func (f *fakeCompose) RemoveContainer(ctx context.Context, name string) error { return nil }
+func (f *fakeCompose) RemoveContainer(ctx context.Context, name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.removed = append(f.removed, name)
+	return nil
+}
 
 func (f *fakeCompose) BuildStage(ctx context.Context, buildContext string, dockerfile string, target string, out io.Writer) error {
 	f.mu.Lock()

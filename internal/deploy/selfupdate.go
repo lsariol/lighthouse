@@ -43,6 +43,11 @@ type HandOff struct {
 	StartedAt      time.Time         `json:"startedAt"`
 	Steps          []projects.Step   `json:"steps"`
 
+	// The secrets' names only: their values reach the helper in its
+	// environment (SecretPrefix, PreviousSecretPrefix), never on disk.
+	Secrets         []string `json:"secrets,omitempty"`
+	PreviousSecrets []string `json:"previousSecrets,omitempty"`
+
 	Done        bool      `json:"done,omitempty"`
 	Status      string    `json:"status,omitempty"`
 	FailureKind string    `json:"failureKind,omitempty"`
@@ -62,10 +67,18 @@ func (h HandOff) Deployment() projects.Deployment {
 
 func (d *Deployer) handOffDir() string { return filepath.Join(d.root, ".self-update") }
 
+// The helper's environment variables that carry the secrets, KEY's value in
+// SecretPrefix+KEY: the new version's, and the one before's for a rollback.
+const (
+	SecretPrefix         = "HANDOFF_SECRET_"
+	PreviousSecretPrefix = "HANDOFF_PREVIOUS_SECRET_"
+)
+
 // handOff writes the hand-off and starts the helper from the new image.
-func (r *run) handOff(ctx context.Context, project compose.Project, dir string, secrets int, out io.Writer) *failure {
-	if secrets > 0 {
-		return permanent(errors.New("Lighthouse's own compose file can't use secrets (${...} without a default): the update helper would have to keep them on disk. Lighthouse reads its secrets from Cove itself"))
+// secrets and r.prevEnv (KEY=value) go to the helper in its environment.
+func (r *run) handOff(ctx context.Context, project compose.Project, dir string, secrets []string, out io.Writer) *failure {
+	if r.prevEnv == nil && len(r.previous) > 0 && r.currentDir(project.Name) != "" {
+		return transient(errors.New("the previous version's secrets couldn't be fetched from Cove, so a rollback couldn't start it again; the update is tried again later"))
 	}
 	image := ""
 	for _, s := range project.Services {
@@ -84,8 +97,9 @@ func (r *run) handOff(ctx context.Context, project compose.Project, dir string, 
 	h := HandOff{
 		Project: r.req.Project, SHA: r.req.SHA, Version: r.req.Version, Trigger: r.req.Trigger,
 		ComposeProject: project.Name, Dir: dir, Services: project.Services, Previous: r.previous,
-		StartedAt: r.started, Steps: steps,
+		StartedAt: r.started, Steps: steps, Secrets: keyNames(secrets), PreviousSecrets: keyNames(r.prevEnv),
 	}
+	env := append(prefixed(SecretPrefix, secrets), prefixed(PreviousSecretPrefix, r.prevEnv)...)
 	if err := os.MkdirAll(r.d.handOffDir(), 0o700); err != nil {
 		return transient(fmt.Errorf("self-update: create %s: %w", r.d.handOffDir(), err))
 	}
@@ -97,9 +111,10 @@ func (r *run) handOff(ctx context.Context, project compose.Project, dir string, 
 	if err := r.d.compose.RemoveContainer(ctx, HelperName); err != nil {
 		fmt.Fprintf(out, "! remove the last update's helper: %v\n", err)
 	}
-	fmt.Fprintf(out, "starting the update helper (%s) from %s\n", HelperName, image)
+	fmt.Fprintf(out, "starting the update helper (%s) from %s, with %d secrets and the previous version's %d\n",
+		HelperName, image, len(h.Secrets), len(h.PreviousSecrets))
 	err := r.d.compose.RunDetached(ctx, HelperName, image,
-		[]string{"/var/run/docker.sock:/var/run/docker.sock", r.d.root + ":" + r.d.root},
+		[]string{"/var/run/docker.sock:/var/run/docker.sock", r.d.root + ":" + r.d.root}, env,
 		[]string{"/lighthouse", "self-update", h.Path})
 	if err != nil {
 		os.Remove(h.Path)
@@ -107,6 +122,46 @@ func (r *run) handOff(ctx context.Context, project compose.Project, dir string, 
 	}
 	fmt.Fprintf(out, "handed off: the helper swaps Lighthouse now; \"docker logs -f %s\" shows how it goes\n", HelperName)
 	return nil
+}
+
+// keyNames are the names in KEY=value lines.
+func keyNames(env []string) []string {
+	var names []string
+	for _, kv := range env {
+		key, _, _ := strings.Cut(kv, "=")
+		names = append(names, key)
+	}
+	return names
+}
+
+// prefixed puts prefix before each KEY=value line's name.
+func prefixed(prefix string, env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		out = append(out, prefix+kv)
+	}
+	return out
+}
+
+// handOffSecrets reads the secrets named in h from the helper's environment,
+// as KEY=value lines, and their values for hiding in output.
+func handOffSecrets(prefix string, names []string) ([]string, map[string]string, error) {
+	env := []string{}
+	values := map[string]string{}
+	var missing []string
+	for _, key := range names {
+		v, ok := os.LookupEnv(prefix + key)
+		if !ok {
+			missing = append(missing, key)
+			continue
+		}
+		env = append(env, key+"="+v)
+		values[key] = v
+	}
+	if len(missing) > 0 {
+		return nil, nil, fmt.Errorf("self-update: the helper wasn't given %s (expected as %s<key> in its environment), so nothing was swapped", strings.Join(missing, ", "), prefix)
+	}
+	return env, values, nil
 }
 
 func writeHandOff(h HandOff) error {
@@ -147,11 +202,19 @@ func (d *Deployer) FinishHandOff(ctx context.Context, path string) error {
 		return fmt.Errorf("self-update: %s is already finished (%s)", path, h.Status)
 	}
 
+	secrets, values, err := handOffSecrets(SecretPrefix, h.Secrets)
+	var prevEnv []string
+	var prevValues map[string]string
+	if err == nil {
+		prevEnv, prevValues, err = handOffSecrets(PreviousSecretPrefix, h.PreviousSecrets)
+	}
+
 	r := &run{d: d, req: Request{Project: h.Project, SHA: h.SHA, Version: h.Version, Trigger: h.Trigger},
 		log: d.log.With("project", h.Project.Name, "sha", short(h.SHA)), previous: h.Previous,
-		prevEnv: []string{}, fallbackDir: h.Dir}
+		prevEnv: prevEnv, fallbackDir: h.Dir, fallbackEnv: secrets, scrub: newScrubber(values)}
+	r.scrub.add(prevValues)
 	project := compose.Project{Name: h.ComposeProject, Services: h.Services}
-	env := deployVars(h.SHA, h.Version)
+	env := append(append([]string{}, secrets...), deployVars(h.SHA, h.Version)...)
 
 	res := Result{}
 	fail := func(step string, f *failure) Result {
@@ -159,7 +222,9 @@ func (d *Deployer) FinishHandOff(ctx context.Context, path string) error {
 		res.Err = fmt.Errorf("%s: %w", step, f.err)
 		return res
 	}
-	if f := r.step(ctx, StepSwap, func(ctx context.Context, out io.Writer) *failure {
+	if err != nil {
+		res = fail(StepHandOff, transient(err))
+	} else if f := r.step(ctx, StepSwap, func(ctx context.Context, out io.Writer) *failure {
 		if err := d.compose.Up(ctx, h.Dir, project.Name, env, out); err != nil {
 			return permanent(err)
 		}
@@ -250,10 +315,19 @@ func (d *Deployer) HandOffInProgress(project string) bool {
 	return false
 }
 
-// Forget deletes a recorded hand-off.
+// Forget deletes a recorded hand-off, and after a successful update the
+// helper's container too: its configuration keeps the secrets it was given.
+// A failed update's helper stays for its logs, until the next update.
 func (d *Deployer) Forget(h HandOff) error {
 	if err := os.Remove(h.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("self-update: remove %s: %w", h.Path, err)
+	}
+	if h.Status == projects.StatusSucceeded {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := d.compose.RemoveContainer(ctx, HelperName); err != nil {
+			d.log.Warn("the update helper's container can't be removed; the next update removes it", "container", HelperName, "err", err)
+		}
 	}
 	return nil
 }

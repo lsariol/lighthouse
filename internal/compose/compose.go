@@ -216,36 +216,43 @@ func (r Runner) Exec(ctx context.Context, container string, command []string, st
 }
 
 // RunDetached starts a container in the background, without Compose labels.
-func (r Runner) RunDetached(ctx context.Context, name string, image string, volumes []string, command []string) error {
+// env (KEY=value) reaches the container by name only (-e KEY): the values
+// stay out of the command line, which other processes can read.
+func (r Runner) RunDetached(ctx context.Context, name string, image string, volumes []string, env []string, command []string) error {
 	args := []string{"run", "-d", "--name", name,
 		"--label", "com.docker.compose.project=", "--label", "com.docker.compose.service="}
 	for _, v := range volumes {
 		args = append(args, "-v", v)
 	}
+	for _, kv := range env {
+		key, _, _ := strings.Cut(kv, "=")
+		args = append(args, "-e", key)
+	}
 	args = append(args, "--entrypoint", command[0], image)
 	args = append(args, command[1:]...)
-	return r.docker(ctx, args...)
+	return r.docker(ctx, env, args...)
 }
 
 // RemoveContainer removes a container, running or not; one that doesn't
 // exist is fine.
 func (r Runner) RemoveContainer(ctx context.Context, name string) error {
-	err := r.docker(ctx, "rm", "-f", name)
+	err := r.docker(ctx, nil, "rm", "-f", name)
 	if err != nil && strings.Contains(err.Error(), "No such container") {
 		return nil
 	}
 	return err
 }
 
-// docker runs a docker command (not compose), with the base environment.
-func (r Runner) docker(ctx context.Context, args ...string) error {
+// docker runs a docker command (not compose), with the base environment
+// plus env.
+func (r Runner) docker(ctx context.Context, env []string, args ...string) error {
 	bin := r.Docker
 	if bin == "" {
 		bin = "docker"
 	}
 	var out tailBuffer
 	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.Env = BaseEnv()
+	cmd.Env = append(BaseEnv(), env...)
 	cmd.Stdout, cmd.Stderr = &out, &out
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() != nil {

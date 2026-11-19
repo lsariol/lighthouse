@@ -154,7 +154,7 @@ scripts/
   db/                      Admin SQL for sparkdb, run by hand (§10.1); test-db.sh uses it too
   test-db.sh               A throwaway Postgres for the integration tests (§13.1)
   e2e-self-update.sh       The self-update end to end against the local Docker (§4.6)
-Dockerfile                 golang:1.27.3-alpine → alpine:3.24 + docker-cli, compose, buildx;
+Dockerfile                 golang:1.27.4-alpine → alpine:3.24 + docker-cli, compose, buildx;
                            a test stage (gofmt, vet, tests with -race) that every deploy of Lighthouse runs
 docker-compose.yml         Lighthouse's own service: mounts, healthcheck, x-lighthouse
 ```
@@ -296,12 +296,15 @@ lighthouse <command>  or  the shell
 
 Lighthouse deploys itself like any project (its compose file says `x-lighthouse: {deploy: releases, tier: infra}`), with one difference at the swap: `docker compose up` would stop the very process doing it. So the deploy runs as usual up to the swap (fetch, inspect, check, test, build, backup), building the new image while the current Lighthouse keeps working, and then **hands off**:
 
-1. **Hand-off** (step `handoff`): Lighthouse writes what the swap needs to `<STAGING_PATH>/.self-update/<commit>.json` (no secrets: its compose file may not use any) and starts the **update helper**, a container called `lighthouse-updater` from the **new** image, running `lighthouse self-update <file>` with the Docker socket and the staging folder. This Lighthouse then takes no more work: it keeps the deploy turn and stops checking.
+1. **Hand-off** (step `handoff`): Lighthouse writes what the swap needs to `<STAGING_PATH>/.self-update/<commit>.json` and starts the **update helper**, a container called `lighthouse-updater` from the **new** image, running `lighthouse self-update <file>` with the Docker socket and the staging folder. This Lighthouse then takes no more work: it keeps the deploy turn and stops checking.
+   - **Secrets** (the `${KEY}`s of Lighthouse's compose file, fetched from Cove as for any project, and the previous version's for a rollback): the file names them, never their values. The values reach the helper in its environment (`HANDOFF_SECRET_<KEY>`, `HANDOFF_PREVIOUS_SECRET_<KEY>`), passed to `docker run` by name (`-e KEY`), so they're on no command line and never on disk. The helper hides them in its output like any deploy, and has no Cove token of its own. A helper missing one swaps nothing and records the update as failed.
+   - If the previous version's secrets can't be fetched, there's no hand-off: a rollback couldn't start that version, so the update waits and is tried again (a transient failure).
+   - The `lighthouse` service itself takes no `${KEY}`: it reads its own secrets from Cove ([§8](#8-cove-integration)).
 2. **Swap and verify** (in the helper): `docker compose up` replaces Lighthouse; the helper waits until the new container is **healthy** (its healthcheck, `lighthouse health`, passes once the daemon answers on its control socket, even while it waits for Cove or the database).
 3. **Roll back** if it isn't healthy in time: the previous image is put back and started from the previous version's folder (or, the first time after a deploy by hand, from the new folder with the old image).
 4. **Record:** the helper writes the result into the file and exits. While it works, nothing deploys Lighthouse again: the new Lighthouse that starts during the swap waits for the result instead of updating itself a second time. If the swap changed nothing (the same image), the old Lighthouse is still running: it records the result itself, gives up the turn and resumes. Whichever Lighthouse runs now (the new one, or the old one after a rollback) records it in `history` at startup and on every scan. A hand-off the helper never finished is recorded as failed after 30 minutes.
 
-`deploy lighthouse` answers "Lighthouse is updating itself…" and the connection ends with the old container. `docker logs -f lighthouse-updater` shows the helper's work; its stopped container stays until the next update removes it. **Migrations must be additive** ([§14.1](#141-databases-and-migrations)): after a rollback, the old version runs on the database the new one migrated.
+`deploy lighthouse` answers "Lighthouse is updating itself…" and the connection ends with the old container. `docker logs -f lighthouse-updater` shows the helper's work. Once a successful update is recorded, the new Lighthouse removes the helper's container, since its configuration keeps the secrets it was given (`docker inspect` shows a container's environment); after a failed one it stays, for its logs, until the next update removes it. **Migrations must be additive** ([§14.1](#141-databases-and-migrations)): after a rollback, the old version runs on the database the new one migrated.
 
 `scripts/e2e-self-update.sh` runs all of this against the local Docker: a real hand-off, swap, and a rollback of a version that never becomes healthy.
 
@@ -917,6 +920,7 @@ What protects what, and what is left to you. The risks accepted on purpose are i
 | The GitHub token | Fine-grained and read-only; stored in Cove, held in memory; only its length is logged | – |
 | The GitHub App's key | Stored in Cove, held in memory, never logged; installation tokens last an hour and cover one repository; the App is installed only where Releases are published | Whoever has the key can write the contents of those repositories (within their rulesets) until the key is replaced ([§4.7](#47-releases)) |
 | Lighthouse's Cove token | File mode 0600, written atomically by CoveClient; no project can mount it; useless off the server (Cove publishes no port) | Readable by root on the server |
+| Secrets of Lighthouse's own update | Named in the hand-off file, never written there; passed to the helper by name, so on no command line; the helper's container is removed after a successful update | Visible to `docker inspect` of the helper after a failed update, as in any container's environment (root only) |
 | The CLI | A Unix socket inside the container, mode 0600, never published; reached only with `docker exec` | Anyone who can `docker exec` can use it (they already have root) |
 | What the CLI can touch | Only watched projects' containers, found by their compose project | – |
 | Network | No published port; joins `spark` to reach Cove | – |
@@ -926,7 +930,7 @@ What protects what, and what is left to you. The risks accepted on purpose are i
 
 ### 13.1 Running locally
 
-Needs Go 1.27.3 and Docker. On Windows, run the commands in PowerShell or Git Bash from the repository folder.
+Needs Go 1.27.4 and Docker. On Windows, run the commands in PowerShell or Git Bash from the repository folder.
 
 ```bash
 cp .env.example .env        # point COVE_URL at your dev Cove; it holds the dev database URLs
@@ -955,7 +959,7 @@ scripts/e2e-self-update.sh       # optional: the self-update end to end against 
 
 On Windows, run these in Git Bash. Without the test database, the integration tests in `internal/database` are skipped and everything else still runs. They run against real Postgres (never sparkdb), over TCP, so passwords and grants are really checked.
 
-**The Go version is pinned in two places, kept equal:** `go 1.27.3` in `go.mod` and `golang:1.27.3-alpine` in the `Dockerfile`. Bump both in one commit.
+**The Go version is pinned in two places, kept equal:** `go 1.27.4` in `go.mod` and `golang:1.27.4-alpine` in the `Dockerfile`. Bump both in one commit.
 
 ---
 
