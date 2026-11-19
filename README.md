@@ -1,134 +1,233 @@
 # Lighthouse
 
-**Push to GitHub, and your home server updates itself.**
+Lighthouse keeps the projects on a personal server up to date: tag a release on GitHub, and it builds, checks and deploys it with Docker.
 
-Lighthouse keeps the projects on a personal server up to date. It watches your GitHub repositories, and when you tag a new release (or, if you prefer, push to `main`), it downloads it, builds it with Docker, hands it the passwords and API keys it needs, and starts it. You don't SSH in to run `git pull`, and there's no cloud CI service to pay for or trust.
+It's built for one person running their own projects on their own hardware, such as a homelab, a spare PC or a small Debian box behind a Cloudflare tunnel. There's no cloud CI service to pay for or trust, and no SSH session to run `git pull` in. Each version's changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
-It's built for one person running their own projects on their own hardware: a homelab, a spare PC, a small Debian box behind a Cloudflare tunnel.
+## Features
 
-> **Status:** in daily use; `CHANGELOG.md` lists each version. [DOCUMENTATION.md](DOCUMENTATION.md) has the details, and what may come later.
+- **Watches your repositories.** Every few seconds it checks each one for a new version tag, or for a new commit on `main` if the project prefers that.
+- **Deploys safely.** The running version keeps serving while the new one downloads and builds. If the new one doesn't come up healthy, the old one is put back. A commit that keeps failing is set aside until a fix arrives.
+- **Checks before it deploys.** A compose file that would reach outside its project (root on the host, another project's files or secrets, the Docker socket) is refused before anything is built, and a Dockerfile `test` stage runs first if there is one. Exceptions are written down, one service at a time, in [`policy.json`](policy.json).
+- **Keeps secrets out of your code.** A project's compose file names the secrets it needs, such as `${MYAPP_DATABASE_URL}`, and Lighthouse fetches them from [Cove](https://github.com/LSariol/Cove), a small self-hosted vault, at deploy time. Nothing secret lives in the repository or on disk, and the app reads ordinary environment variables.
+- **Deploys infrastructure first.** The database and the vault deploy before the apps, one at a time, after a database backup.
+- **Brings things back.** If a project's containers disappear, Lighthouse deploys what was running again.
+- **Publishes your releases.** Once a version is deployed and healthy, Lighthouse publishes its GitHub Release, with that version's notes from `CHANGELOG.md`. Libraries that aren't deployed can have their Releases published too.
+- **Updates itself.** A Lighthouse release is deployed like any project, through a short-lived helper container that puts the old version back if the new one isn't healthy.
+- **Goes back when you ask.** `rollback <name>` returns to what ran before, and it stays there until something newer is released.
+- **Has a control prompt.** List projects, see what's running, read logs, deploy, check a version without deploying it, see how past deploys went, or pause everything.
+- **Remembers what happened.** Every deploy, step by step, is recorded in a small Postgres database.
 
----
-
-## What it does
-
-- **Watches your repos.** Every few seconds it checks for a new version tag, or a new commit on `main`.
-- **Deploys safely.** New commit → download → build → swap. Your old version keeps running while the new one builds, and if the new one doesn't come up healthy, the old one is put back. A commit that keeps failing is set aside until you push a fix.
-- **Follows a branch or your releases.** By default every commit on `main` deploys. A project can instead deploy only version tags (`v1.2.3`), set in its own compose file, and infrastructure (the database, the vault) deploys first, alone, after a database backup.
-- **Brings things back.** If a project's containers disappear, Lighthouse redeploys what was running.
-- **Publishes your releases.** Once a version is deployed and healthy, Lighthouse publishes its GitHub Release, with that version's notes from `CHANGELOG.md`. Libraries that aren't deployed can get their Releases published too.
-- **Updates itself.** Tag a Lighthouse release and it deploys it like any project, through a short-lived helper container that puts the old version back if the new one isn't healthy.
-- **Goes back when you ask.** `rollback <name>` returns to what ran before, and it stays there until something newer comes along.
-- **Checks before it deploys.** A compose file that would reach outside its project (root on the host, another project's files or secrets, the Docker socket) is refused before anything is built, and a Dockerfile `test` stage runs first if there is one. Exceptions are written down in `policy.json`.
-- **Keeps secrets out of your code.** Your project's `docker-compose.yml` names the secrets it needs, like `${MYAPP_DATABASE_URL}`. Lighthouse fetches them from [Cove](https://github.com/LSariol/Cove), a small self-hosted vault, at deploy time. Nothing secret lives in the repo or on disk, and your app only reads normal environment variables.
-- **Gives you a control panel.** A simple command prompt to list projects, see what's running, read logs, redeploy, see how past deploys went, or pause deploys.
-- **Remembers what happened.** Every deploy is recorded in a small Postgres database, so you can see when something changed and why a deploy failed.
-
-## How it fits together
-
-```
-   You push to main
+```text
+   You tag v1.2.0
          │
          ▼
-      GitHub  ◄──── Lighthouse checks for new commits
+      GitHub  ◄──── Lighthouse checks for new releases
                          │
                          ├──► Cove: "what are this project's secrets?"
                          │
-                         └──► Docker: build and start the new version
+                         └──► Docker: test, build and start the new version
                                     │
                                     ▼
                        Your apps, running on your server
 ```
 
-Lighthouse, Cove and your apps all run as Docker containers on the same server, on a shared private Docker network called `spark`.
+Lighthouse, Cove and the apps all run as Docker containers on the same server, on a shared Docker network called `spark`.
 
----
+## Requirements
 
-## Getting a project ready for Lighthouse
+- A Linux server with Docker and Docker Compose.
+- A Postgres server for Lighthouse's own database.
+- A running [Cove](https://github.com/LSariol/Cove) on the `spark` network, at `http://cove:2100`.
+- A fine-grained GitHub token that can read your repositories (contents and metadata, read-only).
+- Optionally, a GitHub App that can write repository contents, if Lighthouse should publish GitHub Releases.
+- Go 1.27.4, only to build or work on Lighthouse itself.
 
-Your repository needs:
+## Getting started
 
-1. **A `docker-compose.yml`** at the top level that builds and runs it. It can have as many services as you like.
-2. **Its deployable code on `main`** (or whatever its default branch is). Private repositories work too.
-3. **Secrets written as placeholders.** Anything secret goes in as `${NAME}`, and you store the real value in Cove under that same name. Settings that aren't secret are just written out normally.
+### 1. Prepare the server
+
+On the server, create the folders Lighthouse keeps its state in, and the shared network:
+
+```bash
+sudo mkdir -p /srv/server/storage/lighthouse/cove /srv/server/staging /srv/backups
+docker network inspect spark >/dev/null 2>&1 || docker network create spark
+```
+
+### 2. Set up the database
+
+Lighthouse uses one database, `lighthouse_db`, with four roles: `lighthouse_owner` (owns everything, can't log in), `lighthouse_migrator` (runs the migrations), `lighthouse_app` (Lighthouse at runtime) and `lighthouse_reader` (read-only, for a tool like pgAdmin). [`scripts/db/setup.sql`](scripts/db/setup.sql) creates whatever is missing and is safe to run again. It never changes the password of a role that already exists. Run it as a Postgres superuser, with a password for each role it has to create:
+
+```bash
+psql -U postgres -d postgres \
+  -v migrator_password="..." -v app_password="..." -v reader_password="..." \
+  -f scripts/db/setup.sql
+```
+
+It ends with `Done.` and a table in which every row matches its `want` column. [`scripts/db/check.sql`](scripts/db/check.sql) shows the same table without changing anything. Lighthouse creates its tables itself, through migrations, at every start.
+
+### 3. Store the secrets in Cove
+
+Lighthouse reads its own secrets from Cove with a read-only token over every key, which it fetches through Cove's bootstrap endpoint on its first start. In Cove's shell (`docker exec -it cove /cove shell`):
+
+```text
+token create lighthouse --allow '*'
+create LIGHTHOUSE_GITHUB_TOKEN <the GitHub token>
+create LIGHTHOUSE_DATABASE_URL postgres://lighthouse_app:<password>@<postgres host>:5432/lighthouse_db?sslmode=disable
+create LIGHTHOUSE_DATABASE_MIGRATOR_URL postgres://lighthouse_migrator:<password>@<postgres host>:5432/lighthouse_db?sslmode=disable
+bootstrap open lighthouse
+```
+
+`bootstrap open` lets Lighthouse collect its token within the next 10 minutes. A password must be letters and digits only, since it sits inside a URL.
+
+### 4. Start Lighthouse
+
+```bash
+git clone https://github.com/lsariol/lighthouse.git
+cd lighthouse
+git checkout v1.4.0      # the newest release
+LIGHTHOUSE_DEPLOY_VERSION=v1.4.0 docker compose up -d --build
+docker logs -f lighthouse
+```
+
+The log shows `Lighthouse ready` once it has its Cove token and its database. `docker exec lighthouse /lighthouse status` then exits with status 0, or lists what needs attention.
+
+Open the control prompt with `docker exec -it lighthouse /lighthouse shell`. `help` lists every command, and `exit` leaves the prompt while Lighthouse keeps running. Single commands work too, such as `docker exec lighthouse /lighthouse list`. To have Lighthouse update itself whenever a new release is tagged, add its own repository: `add https://github.com/lsariol/lighthouse`.
+
+### 5. Add a project
+
+A repository needs a compose file at its top (`compose.yaml` or `docker-compose.yml`) that builds and runs it. Lighthouse runs every service in it.
 
 ```yaml
 name: myapp
+x-lighthouse:
+  deploy: releases                         # deploy version tags (v1.2.3), not every commit
 
 services:
-  myapp:
+  web:
     build: .
-    container_name: myapp
+    container_name: myapp-web
     restart: unless-stopped
     environment:
-      - DATABASE_URL=${MYAPP_DATABASE_URL}   # secret: comes from Cove
-      - LOG_LEVEL=info                       # plain setting
-    networks:
-      - spark
+      - DATABASE_URL=${MYAPP_DATABASE_URL}   # a secret: fetched from Cove at deploy
+      - API_KEY=${SHARED_EXAMPLE_API_KEY}    # a secret several projects share
+      - LOG_LEVEL=info                       # a plain setting: written as a value
+      - APP_VERSION=${LIGHTHOUSE_DEPLOY_VERSION:-dev}
+    volumes:
+      - /srv/server/storage/myapp/data:/app/data   # data: in the project's own folder
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 10s
+      retries: 3
+    networks: [spark]
 
 networks:
   spark:
     external: true
 ```
 
-Then tell Lighthouse about it:
+Then, at the prompt, `add https://github.com/you/myapp`. The project is named after the repository. It deploys at its next version tag, once that tag's commit is on `main`. `check myapp` runs the deploy rules and the test stage first, without deploying anything.
 
-```
-add https://github.com/you/myapp
-```
+What Lighthouse expects of a project:
 
-That's it: it's named after the repository, and the next push to `main` deploys it. To deploy only release tags (`v1.2.3`) instead, which is what Lighthouse's own projects do, add `x-lighthouse: {deploy: releases}` to the compose file. A healthcheck on your services lets Lighthouse tell whether a new version really works before it keeps it. The full list of rules (naming, storage folders, a few gotchas) is in [DOCUMENTATION.md §7](DOCUMENTATION.md#7-connecting-a-project-the-contract).
+- **Secrets are `${KEY}` without a default**, stored in Cove under exactly that name. A project may only use its own keys, which start with its compose project's name in capitals (`MYAPP_`), and shared ones (`SHARED_`). Anything with a default, such as `${KEY:-value}`, is a setting and isn't fetched.
+- **Data lives in the project's own folder**, `/srv/server/storage/<compose project>/`, or in a named volume. A deploy that mounts any other host path, uses `privileged`, `cap_add`, devices or the host's namespaces, or joins another project's network or volume is refused. `help rules` lists every rule.
+- **`name:` at the top** names the compose project, which Lighthouse finds the containers by. Two projects can't share one.
+- **A healthcheck on every service that serves something** lets Lighthouse tell whether a new version really works before it keeps it. Without one, a service only has to stay running for 10 seconds.
+- **`restart: unless-stopped`** on long-running services. A service without a restart policy is treated as a one-off job.
+- **Names on `spark` are unique.** A service name, `container_name` or alias that another project already uses on `spark` would answer for both, so it's refused.
+- **A Dockerfile stage named `test`** (`FROM … AS test`) is built before every deploy, without secrets, and a failure stops the deploy.
+- **A service reached from outside** carries its public address as a label, `com.mobasity.public-url: https://myapp.example.com`, for monitoring and a status page.
 
----
+The `x-lighthouse` block holds a project's own settings:
 
-## Running Lighthouse
+| Setting | Values | What it does |
+|---|---|---|
+| `deploy` | `branch` (default), `releases` | `releases` deploys each new version tag once its commit is on the default branch; `branch` deploys every commit on it |
+| `tier` | `app` (default), `infra`, `data` | The deploy order: `data` first, then `infra`, then apps |
+| `backup` | `postgres` | Dumps the project's Postgres service to `/srv/backups/<compose project>/` before each deploy |
 
-You'll need a Linux server with Docker and Docker Compose, a Postgres server for Lighthouse's own small database, a running [Cove](https://github.com/LSariol/Cove), and a GitHub personal access token with read-only access to your repos. The one-time database setup is a script; [DOCUMENTATION.md §10.1](DOCUMENTATION.md#101-database-setup-once-by-hand) walks through it.
+Every deploy also gives the compose file `LIGHTHOUSE_DEPLOY_VERSION` (the release, or the commit's first 7 characters) and `LIGHTHOUSE_DEPLOY_COMMIT`, and labels each container `com.mobasity.version`.
 
-1. **In Cove**, give Lighthouse access and store your GitHub token:
-   ```
-   token create lighthouse --allow '*'
-   create LIGHTHOUSE_GITHUB_TOKEN <your token>
-   bootstrap open lighthouse
-   ```
-2. **On the server**, create the folders Lighthouse keeps its state in (see [DOCUMENTATION.md §10](DOCUMENTATION.md#10-deploying-lighthouse) for the exact commands), then start it:
-   ```bash
-   git clone https://github.com/lsariol/lighthouse.git
-   cd lighthouse
-   git checkout v1.4.0      # the newest release
-   LIGHTHOUSE_DEPLOY_VERSION=v1.4.0 docker compose up -d --build
-   ```
-3. **Open the control prompt** and add your first project:
-   ```bash
-   docker exec -it lighthouse /lighthouse shell
-   ```
-   Type `help` to see everything it can do, and `exit` to leave (Lighthouse keeps running). Single commands work too: `docker exec lighthouse /lighthouse status`.
+### Publishing GitHub Releases
 
-On its first start Lighthouse picks up its Cove access automatically. After that it just runs, and it comes back after a reboot. Add Lighthouse's own repository too (`add https://github.com/lsariol/lighthouse`) and it updates itself whenever a new release is tagged.
+1. On GitHub, create a GitHub App you own, with no webhook and one repository permission, **Contents: Read and write**.
+2. Generate a private key on the App's page, and install the App on the repositories whose Releases Lighthouse should publish.
+3. Store the whole `.pem` file in Cove, base64-encoded, as `LIGHTHOUSE_GITHUB_APP_SECRET`, then delete the file.
+4. Set `GITHUB_APP_ID` to the App's ID in `docker-compose.yml`, and deploy Lighthouse.
+
+After that, each version Lighthouse deploys and verifies gets its Release, with the version's section of `CHANGELOG.md` (`## v1.2.0 (2026-10-20)`) as its text. `publish <name> <tag>` publishes an older tag by hand.
+
+## Configuration
+
+Lighthouse reads its settings from the environment. In Docker they're written out in `docker-compose.yml`. None of them is a secret.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `COVE_URL` | | Cove's address, `http://cove:2100` |
+| `COVE_TOKEN_PATH` | | Where Lighthouse keeps its Cove token |
+| `STAGING_PATH` | | The deploy folders. In Docker, mounted at the same path as on the host |
+| `STORAGE_PATH` | `/srv/server/storage` | The projects' data folders, mounted read-only to check symlinks |
+| `BACKUP_PATH` | `/srv/backups` | Database backups taken before a deploy |
+| `APP_ENV` | | `prod`, or `dev` for readable logs |
+| `LOG_FORMAT` | `json` | `json` or `text` (`text` with `APP_ENV=dev`) |
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
+| `LIGHTHOUSE_VERSION` | `dev` | The version it reports |
+| `LIGHTHOUSE_POLL_INTERVAL` | `10s` | How often GitHub is checked; at least `5s` |
+| `LIGHTHOUSE_CONTROL_SOCKET` | `/run/lighthouse/control.sock` | Where the daemon listens for the command line |
+| `GITHUB_APP_ID` | | The GitHub App that publishes Releases; unset, publishing is off |
+
+Its secrets come from Cove:
+
+| Key | What it is |
+|---|---|
+| `LIGHTHOUSE_GITHUB_TOKEN` | The GitHub token that reads repositories |
+| `LIGHTHOUSE_DATABASE_URL` | The connection string for `lighthouse_app` |
+| `LIGHTHOUSE_DATABASE_MIGRATOR_URL` | The connection string for `lighthouse_migrator` |
+| `LIGHTHOUSE_GITHUB_APP_SECRET` | The GitHub App's private key, base64-encoded (only for publishing) |
 
 ## Everyday commands
 
 | Command | What it does |
 |---|---|
 | `status` | Is everything healthy? |
-| `list` | Show the projects being watched |
-| `add <github-url>` | Start watching a project (named after the repository) |
-| `remove <name>` | Stop watching a project |
-| `deploy <name> [tag or commit]` | Deploy now, even with no new commit; or a given release or commit |
+| `list` | The projects being watched, and what each runs |
+| `add <github-url>` | Start watching a project |
+| `remove <name>` | Stop watching a project, and remove its containers |
+| `deploy <name> [tag or commit]` | Deploy now, or deploy a given release or commit |
 | `rollback <name>` | Go back to what ran before |
-| `check <name>` | Would its latest commit deploy? (changes nothing) |
-| `logs <name>` | Show a project's recent output |
-| `history <name>` | How its recent deploys went |
+| `check <name> [tag or commit]` | Would it deploy? Changes nothing |
+| `logs <name>` | A project's recent output |
+| `history <name>` | How its recent deploys went; `report <name>` shows one step by step |
 | `releases <name>` | Its version tags, and whether each one's GitHub Release is published |
-| `pause` / `resume` | Hold all deploys / carry on |
-| `help` | Everything else, with examples (`help setup` walks through preparing a repo; `help rules` lists what a deploy refuses) |
+| `pause` / `resume` | Hold all automatic deploys, or carry on |
+| `help` | Everything else, with examples; `help setup` walks through preparing a repository |
 
----
+## Development
 
-## Learn more
+To run Lighthouse on a development machine, copy `.env.example` to `.env` and point it at a development Cove. A local run keeps everything it writes in `.dev/`.
 
-- **[DOCUMENTATION.md](DOCUMENTATION.md)**: how everything works, configuration, troubleshooting, security, known issues and what may come later.
-- **[Cove](https://github.com/LSariol/Cove)**: the secret vault Lighthouse gets its secrets from.
-- **[CoveClient](https://github.com/LSariol/CoveClient)**: the Go library Lighthouse uses to talk to Cove.
+```bash
+go run ./cmd/lighthouse          # the daemon, with its command line on this terminal
+go run ./cmd/lighthouse help     # works without a daemon
+```
 
-Built with Go and Docker, for one person's home server. It isn't meant to be a general-purpose CI/CD platform, but you're welcome to borrow ideas from it.
+The Dockerfile's `test` stage runs gofmt, `go vet` and the tests with the race detector, and Lighthouse builds it before every deploy of itself:
+
+```bash
+docker build --target test .
+```
+
+The database tests need a throwaway Postgres, which [`scripts/test-db.sh`](scripts/test-db.sh) starts. [`scripts/e2e-self-update.sh`](scripts/e2e-self-update.sh) runs a real self-update, with a rollback, against the local Docker.
+
+```bash
+scripts/test-db.sh up
+eval "$(scripts/test-db.sh env)"
+go test -race ./...
+scripts/test-db.sh down
+scripts/e2e-self-update.sh
+```
+
+## License
+
+See [LICENSE](LICENSE).

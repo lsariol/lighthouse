@@ -127,7 +127,7 @@ func TestMissingSecrets(t *testing.T) {
 
 	_, err := ReadSecrets(context.Background(), c)
 	if err == nil || !strings.Contains(err.Error(), DatabaseURLKey) || !strings.Contains(err.Error(), DatabaseMigratorURLKey) ||
-		!strings.Contains(err.Error(), "§10.1") {
+		!strings.Contains(err.Error(), "Store the secrets in Cove") {
 		t.Errorf("ReadSecrets = %v, want both missing keys named and where to fix it", err)
 	}
 }

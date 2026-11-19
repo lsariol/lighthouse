@@ -1,4 +1,5 @@
-// Package policy decides whether a compose file may be deployed (DOCUMENTATION.md §7.1).
+// Package policy decides whether a compose file may be deployed: the deploy
+// rules, and the exceptions in policy.json.
 package policy
 
 import (

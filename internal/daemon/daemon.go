@@ -264,7 +264,7 @@ func (d *Daemon) Publish(ctx context.Context, name string, tag string, date stri
 	r, err := o.Backfill(ctx, name, tag, date, notesFrom)
 	switch {
 	case errors.Is(err, orchestrator.ErrPublishingOff):
-		return control.Release{}, control.Errorf(control.KindUnavailable, "%s. Create the GitHub App and set GITHUB_APP_ID (DOCUMENTATION.md §4.7).", sentenceStart(err.Error()))
+		return control.Release{}, control.Errorf(control.KindUnavailable, "%s. Create the GitHub App and set GITHUB_APP_ID (README: \"Publishing GitHub Releases\").", sentenceStart(err.Error()))
 	case err != nil && r.Tag != "":
 		return toRelease(r), control.Errorf(control.KindConflict, "%s.", sentenceStart(err.Error()))
 	case err != nil:

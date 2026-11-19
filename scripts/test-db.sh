@@ -1,6 +1,6 @@
 #!/bin/sh
 # A throwaway Postgres for the database integration tests, set up with the
-# same scripts/db/setup.sql as sparkdb, so the roles and grants match prod.
+# same scripts/db/setup.sql as production, so the roles and grants match prod.
 #
 #   scripts/test-db.sh up     start it (container lighthouse-testdb, 127.0.0.1:55432)
 #   scripts/test-db.sh down   remove it, with all its data

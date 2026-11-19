@@ -476,7 +476,8 @@ const setupGuide = `Getting a repository ready for Lighthouse (e.g. "plop")
 
 What a deploy refuses: "help rules".
 
-The full rules: DOCUMENTATION.md §7 in the Lighthouse repository.`
+More, with an example: "Add a project" in the README of Lighthouse's
+repository.`
 
 const rulesGuide = `What a deploy refuses
 

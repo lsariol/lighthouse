@@ -27,7 +27,7 @@ func AppKey(ctx context.Context, c *coveclient.Client) ([]byte, error) {
 	values, err := c.GetSecretsContext(ctx, AppKeyKey)
 	switch {
 	case errors.Is(err, coveclient.ErrNotFound):
-		return nil, fmt.Errorf("Cove: %s isn't in Cove: store the GitHub App's private key there (DOCUMENTATION.md §4.7)", AppKeyKey)
+		return nil, fmt.Errorf("Cove: %s isn't in Cove: store the GitHub App's private key there, base64-encoded (README: \"Publishing GitHub Releases\")", AppKeyKey)
 	case err != nil:
 		return nil, fmt.Errorf("Cove: reading %s: %w", AppKeyKey, err)
 	}
@@ -85,7 +85,7 @@ func ReadSecrets(ctx context.Context, c *coveclient.Client) (Secrets, error) {
 	values, err := c.GetSecretsContext(ctx, GitHubTokenKey, DatabaseURLKey, DatabaseMigratorURLKey)
 	switch {
 	case errors.Is(err, coveclient.ErrNotFound):
-		return Secrets{}, fmt.Errorf("Lighthouse's secrets aren't all in Cove (%v). Create them in the Cove shell (DOCUMENTATION.md §10.1) and restart Lighthouse", err)
+		return Secrets{}, fmt.Errorf("Lighthouse's secrets aren't all in Cove (%v). Create them in the Cove shell (README: \"Store the secrets in Cove\") and restart Lighthouse", err)
 	case err != nil:
 		return Secrets{}, fmt.Errorf("reading Lighthouse's secrets from Cove: %w", err)
 	}

@@ -206,7 +206,7 @@ func start(ctx context.Context, cfg config.Config, d *daemon.Daemon, dockerClien
 	commits := github.Client{HTTP: &http.Client{Timeout: 30 * time.Second}}
 	orch := orchestrator.New(db, commits, deployer, dockerClient, secrets.GitHubToken, log)
 	if cfg.GitHubAppID == "" {
-		orch.SetPublisher(nil, "GITHUB_APP_ID isn't set (DOCUMENTATION.md §4.7)")
+		orch.SetPublisher(nil, "GITHUB_APP_ID isn't set (README: \"Publishing GitHub Releases\")")
 	} else {
 		orch.SetPublisher(&github.App{ID: cfg.GitHubAppID, HTTP: commits.HTTP,
 			Key: func(ctx context.Context) ([]byte, error) { return cove.AppKey(ctx, coveClient) }}, "")

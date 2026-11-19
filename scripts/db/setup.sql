@@ -1,4 +1,4 @@
--- Lighthouse database: the one-time Admin setup on sparkdb.
+-- Lighthouse database: the one-time setup, as a Postgres superuser.
 --
 -- Creates what's missing and fixes ownership and access:
 --   roles     lighthouse_owner (NOLOGIN), lighthouse_migrator (member of the owner,
@@ -13,10 +13,10 @@
 -- password is only needed for a role that doesn't exist yet, and every missing
 -- one is checked before anything changes.
 --
--- Run as the Admin superuser; DOCUMENTATION.md §10.1 has the full steps:
---   docker exec -i sparkdb psql -U Admin -d postgres \
+-- Run as a superuser ("Set up the database" in the README):
+--   psql -U postgres -d postgres \
 --     -v migrator_password="..." -v app_password="..." -v reader_password="..." \
---     -f - < scripts/db/setup.sql
+--     -f scripts/db/setup.sql
 
 \set ON_ERROR_STOP on
 SET client_min_messages = warning;
@@ -33,7 +33,7 @@ SELECT NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'lighthouse_owner')   
 
 \if :is_superuser
 \else
-DO $$ BEGIN RAISE EXCEPTION 'Run this as the Admin superuser (psql -U Admin).'; END $$;
+DO $$ BEGIN RAISE EXCEPTION 'Run this as a superuser (psql -U postgres, or your superuser).'; END $$;
 \endif
 
 \if :need_migrator

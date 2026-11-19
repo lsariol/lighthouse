@@ -15,7 +15,8 @@ import (
 	"github.com/lsariol/lighthouse/internal/projects"
 )
 
-// Self-update: DOCUMENTATION.md §4.6.
+// Self-update: Lighthouse deploying itself, with the swap left to a helper
+// container started from the new image.
 
 // HelperName is the update helper's container.
 const HelperName = "lighthouse-updater"

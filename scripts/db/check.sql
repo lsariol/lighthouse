@@ -1,7 +1,7 @@
 -- Lighthouse database: show what exists. Read-only; changes nothing.
 --
--- Run as the Admin superuser, e.g. on the server:
---   docker exec -i sparkdb psql -U Admin -d postgres -f - < scripts/db/check.sql
+-- Run as a superuser:
+--   psql -U postgres -d postgres -f scripts/db/check.sql
 
 \echo '== Roles (want: owner NOLOGIN; migrator, app, reader LOGIN; migrator member of owner with role=lighthouse_owner)'
 SELECT r.rolname AS role,

@@ -1,4 +1,4 @@
-// Package settings reads a project's x-lighthouse block (DOCUMENTATION.md §7.2).
+// Package settings reads a project's x-lighthouse block from its compose file.
 package settings
 
 import (

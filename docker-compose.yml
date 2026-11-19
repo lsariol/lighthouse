@@ -1,6 +1,6 @@
 name: lighthouse
 
-# Lighthouse deploys itself from release tags (DOCUMENTATION.md §4.6).
+# Lighthouse deploys itself from release tags, through its update helper.
 x-lighthouse:
   deploy: releases
   tier: infra
