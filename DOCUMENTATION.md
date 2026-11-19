@@ -194,7 +194,7 @@ main ─► cove ─► CoveClient
    - `LoadOrBootstrap(COVE_TOKEN_PATH)` reads the token file, or fetches a token through Cove's bootstrap endpoint the first time and saves it (mode 0600, atomically).
    - While the endpoint is closed, or Cove is unreachable, it logs a warning and retries every 15 s.
    - `WaitForReady` waits until Cove and its database answer; `Auth` checks the token. A rejected token stops startup with the fix: delete the file, `bootstrap open lighthouse`.
-6. **Secrets.** One `GetSecrets` batch reads `LIGHTHOUSE_GITHUB_TOKEN`, `LIGHTHOUSE_DATABASE_URL` and `LIGHTHOUSE_MIGRATOR_DATABASE_URL`. If any is missing, startup stops and names every missing key.
+6. **Secrets.** One `GetSecrets` batch reads `LIGHTHOUSE_GITHUB_TOKEN`, `LIGHTHOUSE_DATABASE_URL` and `LIGHTHOUSE_DATABASE_MIGRATOR_URL`. If any is missing, startup stops and names every missing key.
 7. **Database** (phase `migrating the database`):
    - Pending migrations are applied as `lighthouse_migrator` (acting as `lighthouse_owner`), under a Postgres lock so two Lighthouses can't migrate at once.
    - The pool connects as `lighthouse_app`, and the schema check refuses a database missing a migration this build needs.
@@ -591,11 +591,11 @@ The settings are read from the default branch's compose file whenever the branch
 | Client | CoveClient `v1.0.0` (`github.com/lsariol/coveclient`) |
 | Address | `COVE_URL=http://cove:2100` on `spark`; Cove has no published port |
 | Token | Lighthouse's own project token, **read-only over everything** (`token create lighthouse --allow '*'`). Fetched once through the bootstrap endpoint and saved to `COVE_TOKEN_PATH`; checked with `Auth` on every start |
-| Keys Lighthouse reads for itself | At startup, in one batch: `LIGHTHOUSE_GITHUB_TOKEN`, `LIGHTHOUSE_DATABASE_URL` (as `lighthouse_app`), `LIGHTHOUSE_MIGRATOR_DATABASE_URL` (as `lighthouse_migrator`). All three must exist |
+| Keys Lighthouse reads for itself | At startup, in one batch: `LIGHTHOUSE_GITHUB_TOKEN`, `LIGHTHOUSE_DATABASE_URL` (as `lighthouse_app`), `LIGHTHOUSE_DATABASE_MIGRATOR_URL` (as `lighthouse_migrator`). All three must exist |
 | Key it reads to publish | `LIGHTHOUSE_GITHUB_APP_SECRET`: the GitHub App's private key, read when publishing first needs it and kept in memory (read again if GitHub rejects it). Missing: Releases stay pending, and `status` says why ([§4.7](#47-releases)) |
 | Keys it reads for projects | Every `${KEY}` without a default in each project's compose file, as one `GetSecrets` batch per deploy (and one more for a rollback) |
 | Audit | Every read shows as `lighthouse` in Cove's `history <KEY>` |
-| Database keys | One connection string per role that logs in, nothing else: `LIGHTHOUSE_DATABASE_URL` (app), `LIGHTHOUSE_MIGRATOR_DATABASE_URL`, `LIGHTHOUSE_READER_DATABASE_URL` (for pgAdmin). No separate password keys ([§10.1](#101-database-setup-once-by-hand)) |
+| Database keys | One connection string per role that logs in, nothing else: `LIGHTHOUSE_DATABASE_URL` (app), `LIGHTHOUSE_DATABASE_MIGRATOR_URL`, `LIGHTHOUSE_DATABASE_READER_URL` (for pgAdmin). No separate password keys ([§10.1](#101-database-setup-once-by-hand)) |
 
 **First start (bootstrap):**
 
@@ -727,13 +727,13 @@ Tables and their grants come later, from Lighthouse's migrations. The script nev
 | Role | Cove key |
 |---|---|
 | `lighthouse_app` | `LIGHTHOUSE_DATABASE_URL` |
-| `lighthouse_migrator` | `LIGHTHOUSE_MIGRATOR_DATABASE_URL` |
-| `lighthouse_reader` | `LIGHTHOUSE_READER_DATABASE_URL` (pgAdmin uses its password) |
+| `lighthouse_migrator` | `LIGHTHOUSE_DATABASE_MIGRATOR_URL` |
+| `lighthouse_reader` | `LIGHTHOUSE_DATABASE_READER_URL` (pgAdmin uses its password) |
 | `lighthouse_owner` | none: it can't log in |
 
 A new password is generated straight into its URL on the server, and `setup.sql` reads it back out of the URL. A password is never typed, shown, or stored twice.
 
-**Dev** (`sparkdb-dev` on the PC): the roles and database are already in place (checked 2026-10-05). In the dev Cove, the URLs use `localhost:5000` as the host, because dev Lighthouse runs on the PC. Add `LIGHTHOUSE_READER_DATABASE_URL` too, then delete the old password keys.
+**Dev** (`sparkdb-dev` on the PC): the roles and database are already in place (checked 2026-10-05). In the dev Cove, the URLs use `localhost:5000` as the host, because dev Lighthouse runs on the PC. Add `LIGHTHOUSE_DATABASE_READER_URL` too, then delete the old password keys.
 
 **Prod**, all on the Debian server over SSH unless marked:
 
@@ -755,30 +755,30 @@ A new password is generated straight into its URL on the server, and `setup.sql`
 4. **One URL per login role**, as `postgres://<role>:<password>@sparkdb:5432/lighthouse_db?sslmode=disable`:
    - **A role that doesn't exist yet** (usually `lighthouse_migrator`) gets a new password:
      ```bash
-     docker exec cove /cove create LIGHTHOUSE_MIGRATOR_DATABASE_URL "postgres://lighthouse_migrator:$(newpw)@sparkdb:5432/lighthouse_db?sslmode=disable"
+     docker exec cove /cove create LIGHTHOUSE_DATABASE_MIGRATOR_URL "postgres://lighthouse_migrator:$(newpw)@sparkdb:5432/lighthouse_db?sslmode=disable"
      ```
    - **A role that exists, with its password in an old key**, keeps that password. Check it's only letters and digits first (a URL can't hold `@ : / ? #` unescaped; this prints only the verdict):
      ```bash
      docker exec cove /cove get LIGHTHOUSE_APP_PASSWORD | grep -qx '[A-Za-z0-9]*' && echo "plain: fine" || echo "special characters: use a new password, see below"
      docker exec cove /cove create LIGHTHOUSE_DATABASE_URL "postgres://lighthouse_app:$(docker exec cove /cove get LIGHTHOUSE_APP_PASSWORD)@sparkdb:5432/lighthouse_db?sslmode=disable"
      ```
-     and the same for `lighthouse_reader` → `LIGHTHOUSE_READER_DATABASE_URL` from `LIGHTHOUSE_READER_PASSWORD`.
+     and the same for `lighthouse_reader` → `LIGHTHOUSE_DATABASE_READER_URL` from `LIGHTHOUSE_READER_PASSWORD`.
    - **A role that exists, with no known password** (or one with special characters): create its URL with `$(newpw)` as for a new role, then set the role to it after step 5:
      ```bash
-     docker exec -i sparkdb psql -U Admin -d postgres -v pw="$(pw LIGHTHOUSE_READER_DATABASE_URL)" <<< "ALTER ROLE lighthouse_reader PASSWORD :'pw';"
+     docker exec -i sparkdb psql -U Admin -d postgres -v pw="$(pw LIGHTHOUSE_DATABASE_READER_URL)" <<< "ALTER ROLE lighthouse_reader PASSWORD :'pw';"
      ```
 5. **Run the setup**, giving it every password. It uses only those of roles it has to create and ignores the rest:
    ```bash
    docker exec -i sparkdb psql -U Admin -d postgres \
-     -v migrator_password="$(pw LIGHTHOUSE_MIGRATOR_DATABASE_URL)" \
+     -v migrator_password="$(pw LIGHTHOUSE_DATABASE_MIGRATOR_URL)" \
      -v app_password="$(pw LIGHTHOUSE_DATABASE_URL)" \
-     -v reader_password="$(pw LIGHTHOUSE_READER_DATABASE_URL)" \
+     -v reader_password="$(pw LIGHTHOUSE_DATABASE_READER_URL)" \
      -f - < /tmp/setup.sql
    ```
    Success: `Done.` and every row matches its `want` column.
 6. **Check every login** against the URL in Cove. Each line should print the name shown:
    ```bash
-   for key in LIGHTHOUSE_DATABASE_URL LIGHTHOUSE_MIGRATOR_DATABASE_URL LIGHTHOUSE_READER_DATABASE_URL; do
+   for key in LIGHTHOUSE_DATABASE_URL LIGHTHOUSE_DATABASE_MIGRATOR_URL LIGHTHOUSE_DATABASE_READER_URL; do
      docker run --rm --network spark postgres:16 psql "$(docker exec cove /cove get $key)" -Atc "select current_user"
    done
    # lighthouse_app, lighthouse_owner (the migrator acts as the owner), lighthouse_reader
@@ -872,7 +872,7 @@ Each deploy cleans up after itself: deploy folders other than the running versio
 | `Lighthouse's secrets aren't all in Cove (… missing: KEY…)` | Create the named keys in Cove ([§10.1](#101-database-setup-once-by-hand) for the database URLs), restart |
 | `waiting for the database to be reachable` repeating; `status` says `waiting for the database` | sparkdb is down or Lighthouse isn't on `spark`. `docker ps` for `sparkdb`. It continues by itself once sparkdb answers |
 | `… password authentication failed for user "lighthouse_…"` | The URL in Cove doesn't match the role's password. Reset the role from the URL ([§10.1](#101-database-setup-once-by-hand) step 4), restart |
-| `the database schema is at version N, but this Lighthouse needs M` | Migrations didn't run: check `LIGHTHOUSE_MIGRATOR_DATABASE_URL` logs in as `lighthouse_migrator`; `lh migrate status` shows which are missing |
+| `the database schema is at version N, but this Lighthouse needs M` | Migrations didn't run: check `LIGHTHOUSE_DATABASE_MIGRATOR_URL` logs in as `lighthouse_migrator`; `lh migrate status` shows which are missing |
 | `apply migrations: …` | A migration failed; nothing after it ran. The message names it. Usually a missing role or grant from §10.1: rerun `setup.sql` |
 | A deploy fails at `check`: `the compose file breaks the deploy rules (…)` | `lh report <name>` lists each finding with its ID. Fix the compose file, or, if the project really needs it, add an exception to `policy.json` ([§7.1](#71-the-deploy-rules)) |
 | A deploy fails at `test`: `<service>'s tests failed` | The Dockerfile's `test` stage failed; `lh report <name>` shows its output |

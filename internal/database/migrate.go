@@ -72,13 +72,13 @@ func PrintMigrationStatus(ctx context.Context, connString string, w io.Writer) e
 func newProvider(ctx context.Context, connString string) (*goose.Provider, *sql.DB, error) {
 	db, err := sql.Open("pgx", connString)
 	if err != nil {
-		return nil, nil, fmt.Errorf("LIGHTHOUSE_MIGRATOR_DATABASE_URL isn't a valid connection string: %w", err)
+		return nil, nil, fmt.Errorf("LIGHTHOUSE_DATABASE_MIGRATOR_URL isn't a valid connection string: %w", err)
 	}
 
 	// goose writes its version table into the schema, so the schema must exist first.
 	if _, err := db.ExecContext(ctx, "CREATE SCHEMA IF NOT EXISTS lighthouse"); err != nil {
 		db.Close()
-		return nil, nil, fmt.Errorf("database: prepare migrations with LIGHTHOUSE_MIGRATOR_DATABASE_URL: %w", err)
+		return nil, nil, fmt.Errorf("database: prepare migrations with LIGHTHOUSE_DATABASE_MIGRATOR_URL: %w", err)
 	}
 
 	fsys, err := fs.Sub(embeddedMigrations, "migrations")
@@ -131,7 +131,7 @@ func (d *Database) CheckSchemaVersion(ctx context.Context) error {
 		return err
 	}
 	if have < want {
-		return fmt.Errorf("the database schema is at version %d, but this Lighthouse needs %d. Check that LIGHTHOUSE_MIGRATOR_DATABASE_URL in Cove logs in as lighthouse_migrator, or run \"lighthouse migrate up\"", have, want)
+		return fmt.Errorf("the database schema is at version %d, but this Lighthouse needs %d. Check that LIGHTHOUSE_DATABASE_MIGRATOR_URL in Cove logs in as lighthouse_migrator, or run \"lighthouse migrate up\"", have, want)
 	}
 	return nil
 }

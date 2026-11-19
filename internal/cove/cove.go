@@ -16,7 +16,7 @@ import (
 const (
 	GitHubTokenKey         = "LIGHTHOUSE_GITHUB_TOKEN"
 	DatabaseURLKey         = "LIGHTHOUSE_DATABASE_URL"          // lighthouse_app
-	MigratorDatabaseURLKey = "LIGHTHOUSE_MIGRATOR_DATABASE_URL" // lighthouse_migrator
+	DatabaseMigratorURLKey = "LIGHTHOUSE_DATABASE_MIGRATOR_URL" // lighthouse_migrator
 )
 
 // AppKeyKey is the GitHub App's private key, read when publishing needs it.
@@ -82,7 +82,7 @@ func Connect(ctx context.Context, c *coveclient.Client, tokenPath string, retry 
 
 // ReadSecrets reads Lighthouse's own secrets from Cove in one request.
 func ReadSecrets(ctx context.Context, c *coveclient.Client) (Secrets, error) {
-	values, err := c.GetSecretsContext(ctx, GitHubTokenKey, DatabaseURLKey, MigratorDatabaseURLKey)
+	values, err := c.GetSecretsContext(ctx, GitHubTokenKey, DatabaseURLKey, DatabaseMigratorURLKey)
 	switch {
 	case errors.Is(err, coveclient.ErrNotFound):
 		return Secrets{}, fmt.Errorf("Lighthouse's secrets aren't all in Cove (%v). Create them in the Cove shell (DOCUMENTATION.md §10.1) and restart Lighthouse", err)
@@ -92,6 +92,6 @@ func ReadSecrets(ctx context.Context, c *coveclient.Client) (Secrets, error) {
 	return Secrets{
 		GitHubToken:         values[GitHubTokenKey],
 		DatabaseURL:         values[DatabaseURLKey],
-		MigratorDatabaseURL: values[MigratorDatabaseURLKey],
+		MigratorDatabaseURL: values[DatabaseMigratorURLKey],
 	}, nil
 }

@@ -86,7 +86,7 @@ func start(t *testing.T, f *fakeCove) *coveclient.Client {
 
 func TestFirstStartWaitsForBootstrap(t *testing.T) {
 	f := &fakeCove{token: "cove_abc", secrets: map[string]string{
-		GitHubTokenKey: "gh", DatabaseURLKey: "postgres://app", MigratorDatabaseURLKey: "postgres://migrator"}}
+		GitHubTokenKey: "gh", DatabaseURLKey: "postgres://app", DatabaseMigratorURLKey: "postgres://migrator"}}
 	f.closedFor.Store(2)
 	c := start(t, f)
 	path := filepath.Join(t.TempDir(), "cove", "token")
@@ -126,7 +126,7 @@ func TestMissingSecrets(t *testing.T) {
 	}
 
 	_, err := ReadSecrets(context.Background(), c)
-	if err == nil || !strings.Contains(err.Error(), DatabaseURLKey) || !strings.Contains(err.Error(), MigratorDatabaseURLKey) ||
+	if err == nil || !strings.Contains(err.Error(), DatabaseURLKey) || !strings.Contains(err.Error(), DatabaseMigratorURLKey) ||
 		!strings.Contains(err.Error(), "§10.1") {
 		t.Errorf("ReadSecrets = %v, want both missing keys named and where to fix it", err)
 	}

@@ -37,9 +37,9 @@ up)
 	echo "Test database ready on 127.0.0.1:$PORT. Next: eval \"\$(scripts/test-db.sh env)\"" >&2
 	;;
 env)
-	echo "export LIGHTHOUSE_TEST_MIGRATOR_DATABASE_URL='postgres://lighthouse_migrator:migrator@127.0.0.1:$PORT/lighthouse_db?sslmode=disable'"
+	echo "export LIGHTHOUSE_TEST_DATABASE_MIGRATOR_URL='postgres://lighthouse_migrator:migrator@127.0.0.1:$PORT/lighthouse_db?sslmode=disable'"
 	echo "export LIGHTHOUSE_TEST_DATABASE_URL='postgres://lighthouse_app:app@127.0.0.1:$PORT/lighthouse_db?sslmode=disable'"
-	echo "export LIGHTHOUSE_TEST_READER_DATABASE_URL='postgres://lighthouse_reader:reader@127.0.0.1:$PORT/lighthouse_db?sslmode=disable'"
+	echo "export LIGHTHOUSE_TEST_DATABASE_READER_URL='postgres://lighthouse_reader:reader@127.0.0.1:$PORT/lighthouse_db?sslmode=disable'"
 	;;
 down)
 	docker rm -f "$NAME" >/dev/null

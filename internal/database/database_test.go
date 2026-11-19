@@ -20,9 +20,9 @@ import (
 // scripts/db/setup.sql (scripts/test-db.sh does it). Without these
 // variables they're skipped.
 var (
-	migratorURL = os.Getenv("LIGHTHOUSE_TEST_MIGRATOR_DATABASE_URL")
+	migratorURL = os.Getenv("LIGHTHOUSE_TEST_DATABASE_MIGRATOR_URL")
 	appURL      = os.Getenv("LIGHTHOUSE_TEST_DATABASE_URL")
-	readerURL   = os.Getenv("LIGHTHOUSE_TEST_READER_DATABASE_URL")
+	readerURL   = os.Getenv("LIGHTHOUSE_TEST_DATABASE_READER_URL")
 )
 
 var migrateOnce sync.Once
@@ -31,7 +31,7 @@ var migrateOnce sync.Once
 func open(t *testing.T) *Database {
 	t.Helper()
 	if migratorURL == "" || appURL == "" {
-		t.Skip("LIGHTHOUSE_TEST_MIGRATOR_DATABASE_URL and LIGHTHOUSE_TEST_DATABASE_URL aren't set (see scripts/test-db.sh)")
+		t.Skip("LIGHTHOUSE_TEST_DATABASE_MIGRATOR_URL and LIGHTHOUSE_TEST_DATABASE_URL aren't set (see scripts/test-db.sh)")
 	}
 	ctx := context.Background()
 
