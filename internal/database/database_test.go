@@ -130,6 +130,21 @@ func isPermissionDenied(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "42501"
 }
 
+func TestPoolConfigCapsConnections(t *testing.T) {
+	for url, want := range map[string]int32{
+		"postgres://u:p@localhost:5432/db":                  maxConns,
+		"postgres://u:p@localhost:5432/db?pool_max_conns=3": 3,
+	} {
+		cfg, err := poolConfig(url)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.MaxConns != want {
+			t.Errorf("MaxConns for %s = %d, want %d", url, cfg.MaxConns, want)
+		}
+	}
+}
+
 func TestUnreachable(t *testing.T) {
 	const nowhere = "postgres://x:y@127.0.0.1:1/db?connect_timeout=2"
 	_, err := Connect(context.Background(), nowhere)
