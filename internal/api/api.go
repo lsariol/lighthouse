@@ -21,7 +21,7 @@ import (
 
 const (
 	// Port is where the API listens, inside its container on spark.
-	Port = 2300
+	Port = 4000
 
 	queryTimeout   = 3 * time.Second
 	requestTimeout = 5 * time.Second

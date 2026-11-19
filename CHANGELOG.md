@@ -2,6 +2,11 @@
 
 All notable changes to Lighthouse. Versions follow [semantic versioning](https://semver.org).
 
+## v1.6.1 (2026-11-19)
+
+### Changed
+- **`lighthouse-api` listens on port 4000** (it was 2300): `http://lighthouse-api:4000` on the `spark` network. A consumer's address changes with it.
+
 ## v1.6.0 (2026-11-19)
 
 Lighthouse answers other projects: `lighthouse-api`, a second container, gives a dashboard read-only access to the projects, their deploys and their releases.

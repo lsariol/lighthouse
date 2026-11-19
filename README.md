@@ -219,7 +219,7 @@ Its secrets come from Cove:
 
 ## The API
 
-`lighthouse-api` listens on port 2300 on the `spark` network, with no port published. Every request but `/healthz` needs `Authorization: Bearer <token>`, the value of `SHARED_LIGHTHOUSE_VISTA_TOKEN`. Answers are JSON, with times in UTC (RFC 3339).
+`lighthouse-api` listens on port 4000 on the `spark` network, with no port published. Every request but `/healthz` needs `Authorization: Bearer <token>`, the value of `SHARED_LIGHTHOUSE_VISTA_TOKEN`. Answers are JSON, with times in UTC (RFC 3339).
 
 | Request | Answer |
 |---|---|

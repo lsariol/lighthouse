@@ -65,7 +65,7 @@ services:
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     mem_limit: 64m
-    expose: ["2300"]
+    expose: ["4000"]
     environment:
       - APP_ENV=prod
       - LIGHTHOUSE_VERSION=${LIGHTHOUSE_DEPLOY_VERSION:-dev}
