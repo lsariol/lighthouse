@@ -132,7 +132,7 @@ func TestPoolConfigCapsConnections(t *testing.T) {
 		"postgres://u:p@localhost:5432/db":                  maxConns,
 		"postgres://u:p@localhost:5432/db?pool_max_conns=3": 3,
 	} {
-		cfg, err := poolConfig(url)
+		cfg, err := poolConfig("LIGHTHOUSE_DATABASE_URL", url, maxConns)
 		if err != nil {
 			t.Fatal(err)
 		}

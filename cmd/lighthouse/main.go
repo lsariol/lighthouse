@@ -16,6 +16,7 @@ import (
 	"github.com/lsariol/blackboxlog"
 	"github.com/lsariol/coveclient"
 	"github.com/lsariol/lighthouse"
+	"github.com/lsariol/lighthouse/internal/api"
 	"github.com/lsariol/lighthouse/internal/cli"
 	"github.com/lsariol/lighthouse/internal/compose"
 	"github.com/lsariol/lighthouse/internal/config"
@@ -49,6 +50,8 @@ func main() {
 		runServe(true)
 	case "serve":
 		runServe(false)
+	case "api":
+		runAPI()
 	case "-h", "--help":
 		printUsage(os.Stdout)
 	case "shell":
@@ -58,7 +61,7 @@ func main() {
 	case "version", "--version":
 		fmt.Println(buildVersion(loadConfig()))
 	case "health":
-		os.Exit(runHealth())
+		os.Exit(runHealth(args[1:]))
 	case "self-update":
 		os.Exit(runSelfUpdate(args[1:]))
 	default:
@@ -70,12 +73,13 @@ func printUsage(w io.Writer) {
 	fmt.Fprint(w, `Usage:
   lighthouse                    Run Lighthouse with its CLI on this terminal (local use)
   lighthouse serve              Run Lighthouse only (what Docker runs)
+  lighthouse api                Run lighthouse-api, the read-only API for other projects
   lighthouse shell              Open the CLI of a running Lighthouse
   lighthouse <command> [args]   Run one CLI command and exit
   lighthouse migrate [status|up]
                                 Show or apply database migrations
   lighthouse version            Print the version
-  lighthouse health             Exit 0 if the daemon answers (the container's healthcheck)
+  lighthouse health [api]       Exit 0 if the daemon (or the API) answers (the healthchecks)
   lighthouse self-update <file> The update helper's work (Lighthouse starts it itself)
 
 In Docker: docker exec -it lighthouse /lighthouse shell
@@ -263,11 +267,23 @@ func runShell() {
 	shell.Run(ctx, stop)
 }
 
-// runHealth is the container's healthcheck: 0 once the daemon answers.
-func runHealth() int {
-	cfg := loadConfig()
+// runHealth is the containers' healthcheck: 0 once the daemon, or with "api" the API, answers.
+func runHealth(args []string) int {
+	if len(args) > 1 || (len(args) == 1 && args[0] != "api") {
+		fmt.Fprintln(os.Stderr, "Usage: lighthouse health [api]")
+		return 2
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	if len(args) == 1 {
+		if err := apiHealthy(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "lighthouse health: %v\n", err)
+			return 1
+		}
+		fmt.Println("ok")
+		return 0
+	}
+	cfg := loadConfig()
 	s, err := control.NewClient(cfg.ControlSocket).Status(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "lighthouse health: %v\n", err)
@@ -275,6 +291,55 @@ func runHealth() int {
 	}
 	fmt.Println(s.Phase)
 	return 0
+}
+
+// apiHealthy is nil while lighthouse-api answers and reaches the database.
+func apiHealthy(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/healthz", api.Port), nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("the API doesn't answer on port %d: %w", api.Port, err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("the API answers %s: it can't reach the database yet (see docker logs lighthouse-api)", resp.Status)
+	}
+	return nil
+}
+
+// runAPI runs lighthouse-api until SIGINT or SIGTERM.
+func runAPI() {
+	cfg, err := config.Load()
+	log := newLogger(false)
+	slog.SetDefault(log)
+	if err != nil {
+		fatalLog(log, err)
+	}
+	if err := cfg.ValidateAPI(); err != nil {
+		fatalLog(log, err)
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	srv, err := api.New(api.Options{
+		Version: buildVersion(cfg),
+		Getenv:  config.Lookup,
+		Log:     log,
+		OpenReader: func(ctx context.Context) (api.Reader, error) {
+			return database.ConnectReader(ctx, cfg.ReaderURL)
+		},
+	})
+	if err != nil {
+		fatalLog(log, err)
+	}
+	if err := srv.Serve(ctx, fmt.Sprintf(":%d", api.Port)); err != nil {
+		fatalLog(log, err)
+	}
+	log.Info("API stopped")
 }
 
 // runSelfUpdate is the update helper's work (internal/deploy/selfupdate.go).

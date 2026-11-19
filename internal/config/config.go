@@ -25,6 +25,7 @@ type Config struct {
 	ControlSocket string
 	PollInterval  time.Duration
 	GitHubAppID   string // the GitHub App that publishes Releases; "" turns publishing off
+	ReaderURL     string // lighthouse-api's connection string, as lighthouse_reader
 }
 
 const (
@@ -56,6 +57,7 @@ func Load() (Config, error) {
 		ControlSocket: env("LIGHTHOUSE_CONTROL_SOCKET"),
 		PollInterval:  defaultPollInterval,
 		GitHubAppID:   env("GITHUB_APP_ID"),
+		ReaderURL:     env("LIGHTHOUSE_DATABASE_READER_URL"),
 	}
 	if cfg.ControlSocket == "" {
 		cfg.ControlSocket = defaultControlSocket
@@ -80,6 +82,17 @@ func Load() (Config, error) {
 
 func env(name string) string {
 	return strings.TrimSpace(os.Getenv(name))
+}
+
+// Lookup reads one variable, trimmed, for settings another package names (lighthouse-api's tokens).
+func Lookup(name string) string { return env(name) }
+
+// ValidateAPI checks the settings lighthouse-api needs.
+func (c Config) ValidateAPI() error {
+	if c.ReaderURL == "" {
+		return errors.New("LIGHTHOUSE_DATABASE_READER_URL isn't set: pass it from Cove in docker-compose.yml's environment, or set it in .env")
+	}
+	return nil
 }
 
 // ValidateCove checks the settings `lighthouse migrate` needs to reach Cove.

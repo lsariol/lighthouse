@@ -12,7 +12,7 @@ services:
       dockerfile: Dockerfile
     container_name: lighthouse
     environment:
-      # No secrets here: Lighthouse reads its own from Cove.
+      # No secrets here: Lighthouse reads its own from Cove; lighthouse-api's come from the deploy.
       - APP_ENV=prod
       - LIGHTHOUSE_VERSION=${LIGHTHOUSE_DEPLOY_VERSION:-dev}
       - COVE_URL=http://cove:2100
@@ -49,6 +49,34 @@ services:
       start_period: 10s
     # Lets a deploy that already swapped finish its check before Lighthouse stops.
     stop_grace_period: 2m
+    networks:
+      - spark
+
+  # Read-only answers about projects, deploys and releases for other projects on spark (Vista).
+  lighthouse-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lighthouse-api
+    command: ["/lighthouse", "api"]
+    restart: unless-stopped
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 64m
+    expose: ["2300"]
+    environment:
+      - APP_ENV=prod
+      - LIGHTHOUSE_VERSION=${LIGHTHOUSE_DEPLOY_VERSION:-dev}
+      - LIGHTHOUSE_DATABASE_READER_URL=${LIGHTHOUSE_DATABASE_READER_URL}
+      - SHARED_LIGHTHOUSE_VISTA_TOKEN=${SHARED_LIGHTHOUSE_VISTA_TOKEN}
+    healthcheck:
+      test: ["CMD", "/lighthouse", "health", "api"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     networks:
       - spark
 

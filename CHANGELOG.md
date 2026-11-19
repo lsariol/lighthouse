@@ -2,6 +2,19 @@
 
 All notable changes to Lighthouse. Versions follow [semantic versioning](https://semver.org).
 
+## v1.6.0 (2026-11-19)
+
+Lighthouse answers other projects: `lighthouse-api`, a second container, gives a dashboard read-only access to the projects, their deploys and their releases.
+
+### Added
+- **`lighthouse-api`:** the same image run as `/lighthouse api`, on port 2300 of the `spark` network with no port published. It reads the database as `lighthouse_reader`, which can't change anything, with at most 4 connections, and holds no Docker socket, control socket or Cove token. It runs as user 10001 with a read-only filesystem, no capabilities and a 64 MB memory limit.
+- **Its answers:** `GET /v1/projects` (every project and its state: `ok`, `failing`, `broken`, `stopped` or `not_deployed`), `GET /v1/deployments` (a time range, newest first, a page at a time), `GET /v1/deployments/{id}` (one deploy with its steps and their output, secrets already hidden) and `GET /v1/releases`. Every request but `GET /healthz` needs a bearer token, `SHARED_LIGHTHOUSE_VISTA_TOKEN`. A wrong parameter is a `400` that names it.
+- `lighthouse health api` is `lighthouse-api`'s healthcheck.
+
+### Changed
+- **Lighthouse's compose file takes secrets:** `LIGHTHOUSE_DATABASE_READER_URL` and `SHARED_LIGHTHOUSE_VISTA_TOKEN`, for `lighthouse-api` only, fetched from Cove by the deploy and handed to the update helper as v1.5.0 does. Create the token in Cove before deploying this version (`generate SHARED_LIGHTHOUSE_VISTA_TOKEN 64`). It needs v1.5.0 or newer running: an older Lighthouse can't hand secrets to its update helper.
+- **A first install starts only the `lighthouse` service by hand,** then `deploy lighthouse` from its prompt starts `lighthouse-api` with its secrets (README, "Start Lighthouse").
+
 ## v1.5.0 (2026-11-19)
 
 Lighthouse's own update can carry secrets, exceptions in `policy.json` grant less, and `check` can try a project before its first release.

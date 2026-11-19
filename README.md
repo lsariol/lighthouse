@@ -17,6 +17,7 @@ It's built for one person running their own projects on their own hardware, such
 - **Goes back when you ask.** `rollback <name>` returns to what ran before, and it stays there until something newer is released.
 - **Has a control prompt.** List projects, see what's running, read logs, deploy, check a version without deploying it, see how past deploys went, or pause everything.
 - **Remembers what happened.** Every deploy, step by step, is recorded in a small Postgres database.
+- **Answers other projects.** A second container, `lighthouse-api`, lets a dashboard read the projects, their deploys and their releases over HTTP with a token. It reads the database through a read-only role and can't change anything.
 
 ```text
    You tag v1.2.0
@@ -75,24 +76,35 @@ token create lighthouse --allow '*'
 create LIGHTHOUSE_GITHUB_TOKEN <the GitHub token>
 create LIGHTHOUSE_DATABASE_URL postgres://lighthouse_app:<password>@<postgres host>:5432/lighthouse_db?sslmode=disable
 create LIGHTHOUSE_DATABASE_MIGRATOR_URL postgres://lighthouse_migrator:<password>@<postgres host>:5432/lighthouse_db?sslmode=disable
+create LIGHTHOUSE_DATABASE_READER_URL postgres://lighthouse_reader:<password>@<postgres host>:5432/lighthouse_db?sslmode=disable
+generate SHARED_LIGHTHOUSE_VISTA_TOKEN 64
 bootstrap open lighthouse
 ```
 
-`bootstrap open` lets Lighthouse collect its token within the next 10 minutes. A password must be letters and digits only, since it sits inside a URL.
+`bootstrap open` lets Lighthouse collect its token within the next 10 minutes. A password must be letters and digits only, since it sits inside a URL. The last two keys are for `lighthouse-api`: its read-only connection, and the token a dashboard sends to it.
 
 ### 4. Start Lighthouse
 
 ```bash
 git clone https://github.com/lsariol/lighthouse.git
 cd lighthouse
-git checkout v1.5.0      # the newest release
-LIGHTHOUSE_DEPLOY_VERSION=v1.5.0 docker compose up -d --build
+git checkout v1.6.0      # the newest release
+LIGHTHOUSE_DEPLOY_VERSION=v1.6.0 docker compose up -d --build lighthouse
 docker logs -f lighthouse
 ```
 
-The log shows `Lighthouse ready` once it has its Cove token and its database. `docker exec lighthouse /lighthouse status` then exits with status 0, or lists what needs attention.
+This starts the `lighthouse` service only: `lighthouse-api`'s secrets come from Cove, which only a deploy by Lighthouse fetches. The log shows `Lighthouse ready` once it has its Cove token and its database. `docker exec lighthouse /lighthouse status` then exits with status 0, or lists what needs attention.
 
-Open the control prompt with `docker exec -it lighthouse /lighthouse shell`. `help` lists every command, and `exit` leaves the prompt while Lighthouse keeps running. Single commands work too, such as `docker exec lighthouse /lighthouse list`. To have Lighthouse update itself whenever a new release is tagged, add its own repository: `add https://github.com/lsariol/lighthouse`.
+Open the control prompt with `docker exec -it lighthouse /lighthouse shell`. `help` lists every command, and `exit` leaves the prompt while Lighthouse keeps running. Single commands work too, such as `docker exec lighthouse /lighthouse list`.
+
+Then have Lighthouse deploy itself, which starts `lighthouse-api` too and keeps Lighthouse up to date whenever a new release is tagged. At the prompt:
+
+```text
+add https://github.com/lsariol/lighthouse
+deploy lighthouse
+```
+
+`docker ps` then lists both `lighthouse` and `lighthouse-api`, healthy.
 
 ### 5. Add a project
 
@@ -185,6 +197,8 @@ Its secrets come from Cove:
 | `LIGHTHOUSE_DATABASE_URL` | The connection string for `lighthouse_app` |
 | `LIGHTHOUSE_DATABASE_MIGRATOR_URL` | The connection string for `lighthouse_migrator` |
 | `LIGHTHOUSE_GITHUB_APP_SECRET` | The GitHub App's private key, base64-encoded (only for publishing) |
+| `LIGHTHOUSE_DATABASE_READER_URL` | The connection string for `lighthouse_reader`, given to `lighthouse-api` by the compose file |
+| `SHARED_LIGHTHOUSE_VISTA_TOKEN` | The token a dashboard sends to `lighthouse-api`, at least 32 characters, given to it by the compose file |
 
 ## Everyday commands
 
@@ -203,6 +217,20 @@ Its secrets come from Cove:
 | `pause` / `resume` | Hold all automatic deploys, or carry on |
 | `help` | Everything else, with examples; `help setup` walks through preparing a repository |
 
+## The API
+
+`lighthouse-api` listens on port 2300 on the `spark` network, with no port published. Every request but `/healthz` needs `Authorization: Bearer <token>`, the value of `SHARED_LIGHTHOUSE_VISTA_TOKEN`. Answers are JSON, with times in UTC (RFC 3339).
+
+| Request | Answer |
+|---|---|
+| `GET /healthz` | `{"status": "ok", "version": …}`, without a token; `503` while the database can't be reached |
+| `GET /v1/projects` | Every project with its compose project, kind, deploy mode, what it runs, its failures and its `state`: `ok`, `failing`, `broken`, `stopped` or `not_deployed` |
+| `GET /v1/deployments?from=&to=&project=&limit=&cursor=` | Deploys that started in the range (the last 30 days by default), newest first, `limit` 1 to 500 (100 by default); `next_cursor` fetches the next page |
+| `GET /v1/deployments/{id}` | One deploy with its steps and the end of each step's output, with secrets already hidden |
+| `GET /v1/releases?project=&limit=` | Version tags, newest first, with their status and GitHub Release |
+
+`project` is a compose project or a project's name. A wrong parameter is a `400` that names it, a missing or unknown token a `401`, an unknown deploy or project a `404`, and a database that can't answer a `503`.
+
 ## Development
 
 To run Lighthouse on a development machine, copy `.env.example` to `.env` and point it at a development Cove. A local run keeps everything it writes in `.dev/`.
@@ -210,6 +238,7 @@ To run Lighthouse on a development machine, copy `.env.example` to `.env` and po
 ```bash
 go run ./cmd/lighthouse          # the daemon, with its command line on this terminal
 go run ./cmd/lighthouse help     # works without a daemon
+go run ./cmd/lighthouse api      # lighthouse-api, with LIGHTHOUSE_DATABASE_READER_URL and SHARED_LIGHTHOUSE_VISTA_TOKEN set
 ```
 
 The Dockerfile's `test` stage runs gofmt, `go vet` and the tests with the race detector, and Lighthouse builds it before every deploy of itself:
