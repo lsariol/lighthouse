@@ -6,8 +6,7 @@ import (
 	"time"
 )
 
-// setEnv sets the variables Load reads, clearing the rest, and points
-// APP_ENV_PATH at a file that doesn't exist so a developer's .env is ignored.
+// setEnv sets the variables Load reads, clears the rest, and ignores a developer's .env.
 func setEnv(t *testing.T, vars map[string]string) {
 	t.Helper()
 	for _, name := range []string{"COVE_URL", "COVE_TOKEN_PATH", "STAGING_PATH", "STORAGE_PATH",

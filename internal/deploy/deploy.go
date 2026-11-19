@@ -373,8 +373,7 @@ func (r *run) deploy(ctx context.Context) Result {
 	return res
 }
 
-// step runs fn as the named step: with its timeout, its output kept (and
-// scrubbed) and written to the log, and recorded in r.steps.
+// step runs fn as the named step, with its timeout, its output scrubbed and logged, and its record.
 func (r *run) step(ctx context.Context, name string, fn func(ctx context.Context, out io.Writer) *failure) *failure {
 	ctx, cancel := context.WithTimeout(ctx, r.d.timeout(name))
 	defer cancel()
@@ -407,8 +406,7 @@ func (r *run) step(ctx context.Context, name string, fn func(ctx context.Context
 	return f
 }
 
-// skipRemaining records every step after failed as skipped, except the
-// rollback's own record.
+// skipRemaining records every step after failed as skipped, except the rollback's.
 func (r *run) skipRemaining(failed string) {
 	order := stepOrder
 	if r.dry {
@@ -549,8 +547,7 @@ func (r *run) inspect(ctx context.Context, incoming string, out io.Writer) (comp
 	return project, dir, keys, nil
 }
 
-// check applies the deploy rules (internal/policy) to the compose file, with
-// the exceptions in policy.json.
+// check applies the deploy rules, with policy.json's exceptions, to the compose file.
 func (r *run) check(ctx context.Context, project compose.Project, dir string, keys []string, out io.Writer) *failure {
 	names, err := r.d.docker.NetworkNames(ctx, policy.SharedNetwork)
 	if err != nil {
@@ -613,8 +610,7 @@ func (r *run) test(ctx context.Context, project compose.Project, out io.Writer) 
 	return nil
 }
 
-// fetchSecrets gets the values of keys from Cove, as KEY=value lines, and
-// starts hiding them in all output.
+// fetchSecrets gets keys' values from Cove as KEY=value lines and hides them in all output.
 func (r *run) fetchSecrets(ctx context.Context, keys []string, out io.Writer) ([]string, *failure) {
 	if len(keys) == 0 {
 		fmt.Fprintln(out, "the compose file uses no secrets")
@@ -638,8 +634,7 @@ func (r *run) fetchSecrets(ctx context.Context, keys []string, out io.Writer) ([
 	return env, nil
 }
 
-// build tags the images running now (so a rollback can put them back), then
-// builds the new ones and tags them with the commit.
+// build tags the running images for a rollback, then builds the new ones tagged with the commit.
 func (r *run) build(ctx context.Context, dir string, project compose.Project, env []string, out io.Writer) *failure {
 	running, err := r.d.docker.ProjectContainers(ctx, project.Name)
 	if err != nil {
@@ -740,8 +735,7 @@ func (r *run) backup(ctx context.Context, project compose.Project, out io.Writer
 	return nil
 }
 
-// dump writes pg_dumpall's output, gzipped, to a new file only its owner can
-// read: it holds every role's password hash.
+// dump writes pg_dumpall's output, gzipped, to a file only its owner can read.
 func dump(ctx context.Context, c Compose, container string, path string) error {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -758,8 +752,7 @@ func dump(ctx context.Context, c Compose, container string, path string) error {
 	return err
 }
 
-// pruneBackups keeps the newest keep backups in dir (their names sort by
-// time).
+// pruneBackups keeps the newest keep backups in dir.
 func pruneBackups(dir string, keep int, out io.Writer) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -780,8 +773,7 @@ func pruneBackups(dir string, keep int, out io.Writer) {
 	}
 }
 
-// rollBack restores the version that ran before: its images under their usual
-// names, then docker compose up from its folder.
+// rollBack puts back the previous version's images and starts it from its folder.
 func (r *run) rollBack(ctx context.Context, res Result, project compose.Project, failedDir string) Result {
 	prevSHA := r.req.Project.DeployedSHA
 	prevDir := r.currentDir(project.Name)
@@ -864,24 +856,21 @@ func (r *run) currentDir(composeProject string) string {
 	return dir
 }
 
-// removeUnlessCurrent deletes a failed deploy's folder, unless it's the one
-// running (a redeploy of the same commit).
+// removeUnlessCurrent deletes a failed deploy's folder, unless it's the one running.
 func (r *run) removeUnlessCurrent(dir string) {
 	if dir != "" && dir != r.currentDir(filepath.Base(filepath.Dir(dir))) {
 		os.RemoveAll(dir)
 	}
 }
 
-// rollbackRef is the image name Lighthouse keeps a version under:
-// <repository>:lh-<first 12 of the commit>.
+// rollbackRef is the image a version is kept under: <repository>:lh-<first 12 of the commit>.
 func rollbackRef(image string, sha string) string {
 	return repository(image) + ":" + rollbackPrefix + short12(sha)
 }
 
 const rollbackPrefix = "lh-"
 
-// repository is an image reference without its tag: "website-web" for
-// "website-web:latest", "registry:5000/app" for "registry:5000/app:1.2".
+// repository is an image reference without its tag, such as "registry:5000/app".
 func repository(ref string) string {
 	slash := strings.LastIndex(ref, "/")
 	if colon := strings.LastIndex(ref, ":"); colon > slash {

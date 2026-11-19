@@ -31,8 +31,7 @@ type fakeRepo struct {
 	releases  []github.Release  // its GitHub Releases
 }
 
-// fakeGitHub serves repositories by name, honouring ETags, and counts
-// requests.
+// fakeGitHub serves repositories by name, honouring ETags, and counts requests.
 type fakeGitHub struct {
 	mu    sync.Mutex
 	repos map[string]*fakeRepo
@@ -463,8 +462,7 @@ func TestRetry(t *testing.T) {
 	}
 }
 
-// A release that broke a project and then deployed with `retry` is published
-// like one a check deployed.
+// A release deployed with `retry` after breaking a project is published like a checked one.
 func TestRetryPublishes(t *testing.T) {
 	gh := newGitHub(map[string]string{"cove": "h1"})
 	gh.repos["cove"].compose = releases("app")
@@ -966,8 +964,7 @@ func TestStoppedProjectsAreLeftAlone(t *testing.T) {
 	}
 }
 
-// A scan during a deploy by hand of a stopped project waits for its turn,
-// then finds the commit already running and doesn't deploy it again.
+// A scan waiting behind a deploy by hand finds the commit running and doesn't deploy it again.
 func TestNoSecondDeployAfterADeployByHand(t *testing.T) {
 	gh := newGitHub(map[string]string{"a": "aaa"})
 	o, store, d, _ := setup(t, gh, "a")
@@ -1151,8 +1148,7 @@ func TestOneScanAtATime(t *testing.T) {
 	}
 }
 
-// Removing a project while it deploys must not fail the scan or touch
-// another project.
+// Removing a project while it deploys mustn't fail the scan or touch another project.
 func TestRemoveDuringScan(t *testing.T) {
 	o, store, d, _ := setup(t, newGitHub(map[string]string{"a": "aaa", "b": "bbb"}), "a", "b")
 	d.result = func(req deploy.Request) deploy.Result {

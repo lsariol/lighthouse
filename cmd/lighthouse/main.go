@@ -30,12 +30,10 @@ import (
 	"github.com/lsariol/lighthouse/internal/policy"
 )
 
-// retryEvery is how long startup waits before trying an unreachable Cove or
-// database again.
+// retryEvery is how long startup waits before trying an unreachable Cove or database again.
 const retryEvery = 15 * time.Second
 
-// shutdownWait is how long stopping waits for a deploy in progress. Keep it
-// under the compose file's stop_grace_period.
+// shutdownWait is how long stopping waits for a deploy in progress; keep it under stop_grace_period.
 const shutdownWait = 100 * time.Second
 
 func main() {
@@ -155,8 +153,7 @@ func runServe(withShell bool) {
 	log.Info("Lighthouse stopped")
 }
 
-// start connects to Cove and the database, migrates it, and hands the daemon
-// its store and orchestrator.
+// start connects Cove and the database, migrates it, and hands the daemon its store and orchestrator.
 func start(ctx context.Context, cfg config.Config, d *daemon.Daemon, dockerClient *docker.Client, log *slog.Logger) (*database.Database, *orchestrator.Orchestrator, error) {
 	rules, err := policy.Parse(lighthouse.PolicyFile)
 	if err != nil {
@@ -224,8 +221,7 @@ func start(ctx context.Context, cfg config.Config, d *daemon.Daemon, dockerClien
 	return db, orch, nil
 }
 
-// openDatabase applies pending migrations as the migrator, then connects as
-// the app and checks the schema.
+// openDatabase migrates as the migrator, then connects as the app and checks the schema.
 func openDatabase(ctx context.Context, d *daemon.Daemon, secrets cove.Secrets, log *slog.Logger) (*database.Database, error) {
 	log = log.With("component", "database")
 	for {
@@ -395,8 +391,7 @@ func buildVersion(cfg config.Config) string {
 	return "dev"
 }
 
-// newLogger returns the daemon's logger: Blackbox's format, or readable text
-// when it shares a terminal with the CLI.
+// newLogger returns Blackbox's format, or readable text when it shares a terminal with the CLI.
 func newLogger(terminal bool) *slog.Logger {
 	if terminal {
 		return blackboxlog.New(blackboxlog.Options{Format: blackboxlog.Text})
@@ -416,8 +411,7 @@ func fatalLog(log *slog.Logger, err error) {
 	os.Exit(1)
 }
 
-// fatalServe is fatalLog for the daemon once its control socket is open: it
-// removes the socket so the next start doesn't find a stale one.
+// fatalServe is fatalLog that also removes the control socket, so the next start doesn't find it.
 func fatalServe(cfg config.Config, log *slog.Logger, err error) {
 	os.Remove(cfg.ControlSocket)
 	fatalLog(log, err)

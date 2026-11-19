@@ -16,8 +16,7 @@ import (
 // The Database is the projects.Store.
 var _ projects.Store = (*Database)(nil)
 
-// Postgres error codes and constraint names the store turns into
-// projects errors.
+// Postgres error codes and constraint names the store turns into projects errors.
 const (
 	uniqueViolation = "23505"
 	checkViolation  = "23514"
@@ -109,8 +108,7 @@ func (d *Database) add(ctx context.Context, name string, repo github.Repo, kind 
 	return p, nil
 }
 
-// exec runs a statement that changes one project, and returns ErrNotFound if
-// it matched none.
+// exec runs a statement that changes one project, or returns ErrNotFound.
 func (d *Database) exec(ctx context.Context, query string, args ...any) error {
 	tag, err := d.pool.Exec(ctx, query, args...)
 	if err != nil {
@@ -224,8 +222,7 @@ func (d *Database) RecordDeployment(ctx context.Context, dep projects.Deployment
 	})
 }
 
-// recordDeployedReleases applies projects.DeployedReleases in a
-// RecordDeployment transaction.
+// recordDeployedReleases applies projects.DeployedReleases in RecordDeployment's transaction.
 func recordDeployedReleases(ctx context.Context, tx pgx.Tx, projectID int64, depID int64, dep projects.Deployment) error {
 	if _, ok := release.Parse(dep.Version); !ok {
 		return nil
@@ -379,8 +376,7 @@ func (d *Database) ClearFailures(ctx context.Context, name string) error {
 const deploymentColumns = `d.id, coalesce(d.sha, ''), coalesce(d.version, ''), d.trigger, d.status, coalesce(d.failure_kind, ''), coalesce(d.failed_step, ''),
 	d.started_at, d.finished_at, coalesce(d.error, '')`
 
-// deployments returns the project's deployments, newest first, with their
-// IDs.
+// deployments returns the project's deployments, newest first, with their IDs.
 func (d *Database) deployments(ctx context.Context, p projects.Project, limit int, offset int) ([]projects.Deployment, []int64, error) {
 	rows, err := d.pool.Query(ctx, `SELECT `+deploymentColumns+`
 		FROM lighthouse.deployments d JOIN lighthouse.projects p ON p.id = d.project_id

@@ -9,8 +9,7 @@ import (
 	"github.com/lsariol/lighthouse/internal/github"
 )
 
-// Version is a version tag: the tag as written, its numbers, and its
-// pre-release part ("rc.1"; "" for a stable release).
+// Version is a version tag: as written, its numbers, and its pre-release part ("" if stable).
 type Version struct {
 	Tag                 string
 	Major, Minor, Patch int
@@ -19,8 +18,7 @@ type Version struct {
 
 var version = regexp.MustCompile(`^v?(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?$`)
 
-// ParseTag reads a version tag, stable or pre-release; ok is false if it
-// isn't one.
+// ParseTag reads a version tag, stable or pre-release; ok is false if it isn't one.
 func ParseTag(tag string) (Version, bool) {
 	m := version.FindStringSubmatch(tag)
 	if m == nil {
@@ -33,8 +31,7 @@ func ParseTag(tag string) (Version, bool) {
 	return v, true
 }
 
-// Parse reads a stable release tag; ok is false for anything else,
-// pre-releases included.
+// Parse reads a stable release tag; ok is false for anything else.
 func Parse(tag string) (Version, bool) {
 	v, ok := ParseTag(tag)
 	if !ok || v.Prerelease() {
@@ -46,8 +43,7 @@ func Parse(tag string) (Version, bool) {
 // Prerelease reports whether v is a pre-release, such as v1.2.0-rc.1.
 func (v Version) Prerelease() bool { return v.Pre != "" }
 
-// Compare orders versions by SemVer precedence: -1 if v is earlier than w,
-// 0 if they're equal, 1 if v is later. A pre-release comes before its release.
+// Compare orders versions by SemVer precedence: -1, 0 or 1; a pre-release comes before its release.
 func (v Version) Compare(w Version) int {
 	for _, d := range [][2]int{{v.Major, w.Major}, {v.Minor, w.Minor}, {v.Patch, w.Patch}} {
 		if d[0] != d[1] {
@@ -71,8 +67,7 @@ func (v Version) Compare(w Version) int {
 	return cmp(len(a), len(b))
 }
 
-// comparePart compares pre-release identifiers: numbers as numbers, below
-// anything with letters, which compare as text.
+// comparePart compares pre-release identifiers: numbers as numbers, below text.
 func comparePart(a, b string) int {
 	na, errA := strconv.Atoi(a)
 	nb, errB := strconv.Atoi(b)
@@ -114,8 +109,7 @@ func Newest(tags []github.Tag) (github.Tag, Version, bool) {
 	return best, bestV, found
 }
 
-// Higher returns whichever of two versions is the higher stable release: a,
-// b, or, when neither is one, "".
+// Higher returns whichever of a and b is the higher stable release, or "" if neither is.
 func Higher(a string, b string) string {
 	va, okA := Parse(a)
 	vb, okB := Parse(b)

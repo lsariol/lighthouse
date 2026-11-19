@@ -19,10 +19,7 @@ func TestPolicyFileLoads(t *testing.T) {
 	}
 }
 
-// Lighthouse deploys itself: its own compose file must pass the deploy
-// rules with the exceptions policy.json gives it, and deploy releases. It
-// needs no secrets yet: the Lighthouse running now, which deploys this
-// version, may be one whose update helper can't carry them.
+// Lighthouse's own compose file passes the rules with its exceptions and needs no secrets, which an older helper can't carry.
 func TestOwnComposeFileDeploys(t *testing.T) {
 	if err := exec.Command("docker", "compose", "version").Run(); err != nil {
 		t.Skip("docker compose isn't installed")

@@ -5,8 +5,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -o lighthouse ./cmd/lighthouse
 
-# Lighthouse builds this stage before deploying itself: a failure stops the
-# deploy. The database tests skip here (no Postgres); scripts/test-db.sh runs them.
+# Built before every deploy of Lighthouse: a failure stops it. Database tests skip here, with no Postgres.
 FROM builder AS test
 RUN apk add --no-cache gcc musl-dev
 RUN unformatted="$(gofmt -l .)" && [ -z "$unformatted" ] || { echo "These files need gofmt:"; echo "$unformatted"; exit 1; }

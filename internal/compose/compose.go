@@ -30,8 +30,7 @@ type Service struct {
 	Dockerfile string
 }
 
-// ImageName is the image Compose gives the service: its `image:`, or
-// <project>-<service> for one that's only built.
+// ImageName is the service's image: its `image:`, or <project>-<service> if it's only built.
 func (s Service) ImageName(project string) string {
 	if s.Image != "" {
 		return s.Image
@@ -62,8 +61,7 @@ func (r Runner) command(ctx context.Context, dir string, env []string, args ...s
 	return cmd
 }
 
-// run runs a command, sending its output to out and returning an error that
-// includes the output's last lines.
+// run runs a command with its output to out; its error includes the output's last lines.
 func (r Runner) run(ctx context.Context, dir string, env []string, out io.Writer, args ...string) error {
 	var tail tailBuffer
 	cmd := r.command(ctx, dir, env, args...)
@@ -174,8 +172,7 @@ func (r Runner) Build(ctx context.Context, dir string, project string, env []str
 	return r.run(ctx, dir, env, out, "-p", project, "build")
 }
 
-// BuildStage builds one stage of a Dockerfile, e.g. its test stage, with
-// nothing from the compose file: no build arguments and no secrets.
+// BuildStage builds one Dockerfile stage, such as test, without build arguments or secrets.
 func (r Runner) BuildStage(ctx context.Context, buildContext string, dockerfile string, target string, out io.Writer) error {
 	bin := r.Docker
 	if bin == "" {
@@ -195,8 +192,7 @@ func (r Runner) BuildStage(ctx context.Context, buildContext string, dockerfile 
 	return nil
 }
 
-// Exec runs a command in a running container, sending its standard output to
-// stdout (e.g. a database dump).
+// Exec runs a command in a running container, its standard output to stdout.
 func (r Runner) Exec(ctx context.Context, container string, command []string, stdout io.Writer) error {
 	bin := r.Docker
 	if bin == "" {
@@ -215,9 +211,7 @@ func (r Runner) Exec(ctx context.Context, container string, command []string, st
 	return nil
 }
 
-// RunDetached starts a container in the background, without Compose labels.
-// env (KEY=value) reaches the container by name only (-e KEY): the values
-// stay out of the command line, which other processes can read.
+// RunDetached starts a container without Compose labels; env's values stay off the command line.
 func (r Runner) RunDetached(ctx context.Context, name string, image string, volumes []string, env []string, command []string) error {
 	args := []string{"run", "-d", "--name", name,
 		"--label", "com.docker.compose.project=", "--label", "com.docker.compose.service="}
@@ -233,8 +227,7 @@ func (r Runner) RunDetached(ctx context.Context, name string, image string, volu
 	return r.docker(ctx, env, args...)
 }
 
-// RemoveContainer removes a container, running or not; one that doesn't
-// exist is fine.
+// RemoveContainer removes a container, running or not; a missing one is fine.
 func (r Runner) RemoveContainer(ctx context.Context, name string) error {
 	err := r.docker(ctx, nil, "rm", "-f", name)
 	if err != nil && strings.Contains(err.Error(), "No such container") {
@@ -243,8 +236,7 @@ func (r Runner) RemoveContainer(ctx context.Context, name string) error {
 	return err
 }
 
-// docker runs a docker command (not compose), with the base environment
-// plus env.
+// docker runs a docker command (not compose) with the base environment plus env.
 func (r Runner) docker(ctx context.Context, env []string, args ...string) error {
 	bin := r.Docker
 	if bin == "" {
@@ -263,9 +255,7 @@ func (r Runner) docker(ctx context.Context, env []string, args ...string) error 
 	return nil
 }
 
-// Up starts the project from images already built, replacing its running
-// containers, and removes containers of services it no longer has. With
-// VersionVar in env, every service gets VersionLabel.
+// Up starts the project from built images, removing services it no longer has; VersionVar in env labels them.
 func (r Runner) Up(ctx context.Context, dir string, project string, env []string, out io.Writer) error {
 	args := []string{"-p", project}
 	if version := lookup(env, VersionVar); version != "" {
@@ -278,8 +268,7 @@ func (r Runner) Up(ctx context.Context, dir string, project string, env []string
 	return r.run(ctx, dir, env, out, append(args, "up", "-d", "--no-build", "--remove-orphans")...)
 }
 
-// VersionVar is the deploy's version in a deploy's environment; VersionLabel
-// carries it on every container, for whatever reads Docker (Sonar).
+// VersionVar carries the deploy's version; VersionLabel puts it on every container, for Sonar.
 const (
 	VersionVar   = "LIGHTHOUSE_DEPLOY_VERSION"
 	VersionLabel = "com.mobasity.version"
@@ -294,9 +283,7 @@ var (
 	overrideFiles = []string{"compose.override.yaml", "compose.override.yml", "docker-compose.override.yaml", "docker-compose.override.yml"}
 )
 
-// versionLabel writes labelsFile, giving every service in dir's compose file
-// VersionLabel, and returns the -f arguments that add it to the project's own
-// files (its compose file, and its override file if it has one).
+// versionLabel writes labelsFile and returns the -f arguments that add VersionLabel to every service.
 func (r Runner) versionLabel(ctx context.Context, dir string, version string) ([]string, error) {
 	var args []string
 	for _, names := range [][]string{composeFiles, overrideFiles} {

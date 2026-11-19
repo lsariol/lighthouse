@@ -110,8 +110,7 @@ func (fakePublisher) Publish(ctx context.Context, repo github.Repo, r github.New
 	return github.Release{Tag: r.Tag, URL: "https://github.com/" + repo.String() + "/releases/tag/" + r.Tag}, nil
 }
 
-// newDaemon returns a running daemon on an in-memory store, with
-// personalWebsite (compose project "website": web, www, bot) watched.
+// newDaemon returns a running daemon on an in-memory store, watching personalWebsite.
 func newDaemon(t *testing.T) (*Daemon, *fakeContainers, *fakeCompose, *projectstest.Store) {
 	t.Helper()
 	store := &projectstest.Store{}

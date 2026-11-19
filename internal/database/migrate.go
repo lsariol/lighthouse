@@ -19,8 +19,7 @@ import (
 //go:embed migrations/*.sql
 var embeddedMigrations embed.FS
 
-// migrationsTable is where goose records applied migrations. It lives in the
-// lighthouse schema, so everything Lighthouse owns stays in one place.
+// migrationsTable keeps goose's records in the lighthouse schema, with everything else Lighthouse owns.
 const migrationsTable = "lighthouse.goose_db_version"
 
 // undefinedTable is Postgres's error code for a missing table.
@@ -104,8 +103,7 @@ func newProvider(ctx context.Context, connString string) (*goose.Provider, *sql.
 	return provider, db, nil
 }
 
-// SchemaVersion returns the database's migration version and the version this
-// build needs.
+// SchemaVersion returns the database's migration version and the one this build needs.
 func (d *Database) SchemaVersion(ctx context.Context) (have int64, want int64, err error) {
 	want, err = latestMigration()
 	if err != nil {
@@ -123,8 +121,7 @@ func (d *Database) SchemaVersion(ctx context.Context) (have int64, want int64, e
 	return have, want, nil
 }
 
-// CheckSchemaVersion refuses a database missing a migration this build needs,
-// so Lighthouse stops at startup instead of failing on its first query.
+// CheckSchemaVersion refuses a database missing a migration, so Lighthouse stops at startup.
 func (d *Database) CheckSchemaVersion(ctx context.Context) error {
 	have, want, err := d.SchemaVersion(ctx)
 	if err != nil {

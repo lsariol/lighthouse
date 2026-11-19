@@ -16,8 +16,7 @@ import (
 	"github.com/lsariol/lighthouse/internal/projects"
 )
 
-// newSelfEnv is Lighthouse deploying itself: compose project "lighthouse",
-// one built service, no secrets.
+// newSelfEnv is Lighthouse deploying itself: one built service, no secrets.
 func newSelfEnv(t *testing.T) *env {
 	e := newEnv(t)
 	e.d.self = "lighthouse"
@@ -59,8 +58,7 @@ func TestSelfDeployHandsOff(t *testing.T) {
 	}
 }
 
-// newSelfEnvWithSecret is newSelfEnv with one secret, and a previous version
-// running from a folder this Lighthouse keeps.
+// newSelfEnvWithSecret is newSelfEnv with one secret and a previous version running.
 func newSelfEnvWithSecret(t *testing.T) (*env, projects.Project) {
 	e := newSelfEnv(t)
 	e.compose.vars = append(e.compose.vars, compose.Variable{Name: "LIGHTHOUSE_API_TOKEN"})
@@ -72,8 +70,7 @@ func newSelfEnvWithSecret(t *testing.T) (*env, projects.Project) {
 	return e, p
 }
 
-// The hand-off names the secrets; their values reach the helper only in its
-// environment, the previous version's too.
+// Secret values reach the helper only in its environment, the previous version's too.
 func TestSelfDeployCarriesSecrets(t *testing.T) {
 	e, p := newSelfEnvWithSecret(t)
 	res := e.d.Deploy(context.Background(), Request{Project: p, SHA: sha2})
@@ -95,8 +92,7 @@ func TestSelfDeployCarriesSecrets(t *testing.T) {
 	}
 }
 
-// The helper swaps with the new values, and a rollback starts the previous
-// version with its own.
+// The helper swaps with the new values, and a rollback starts the previous version with its own.
 func TestHelperUsesTheSecrets(t *testing.T) {
 	e, p := newSelfEnvWithSecret(t)
 	e.d.Deploy(context.Background(), Request{Project: p, SHA: sha2})
@@ -134,8 +130,7 @@ func TestHelperWithoutItsSecrets(t *testing.T) {
 	}
 }
 
-// Without the previous version's secrets a rollback couldn't start it, so
-// the update waits and is tried again.
+// Without the previous version's secrets, the update waits and is tried again.
 func TestSelfDeployWaitsForThePreviousSecrets(t *testing.T) {
 	e, p := newSelfEnvWithSecret(t)
 	e.secrets.err, e.secrets.failOn = errors.New("Cove: connection refused"), 2

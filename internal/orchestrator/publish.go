@@ -13,25 +13,21 @@ import (
 	"github.com/lsariol/lighthouse/internal/release"
 )
 
-// Publisher creates GitHub Releases with write access; *github.App
-// implements it. github.ErrNotInstalled if it can't write to a repository.
+// Publisher creates GitHub Releases, as *github.App does; github.ErrNotInstalled if it can't write.
 type Publisher interface {
 	Publish(ctx context.Context, repo github.Repo, r github.NewRelease) (github.Release, error)
 }
 
-// PublishEvery is how often due Releases are looked for, besides right
-// after a deploy that queued one.
+// PublishEvery is how often due Releases are looked for, besides after a deploy that queued one.
 const PublishEvery = time.Minute
 
-// Waits before publishing is tried again: after a permanent failure (a
-// permission, a key), and while the App isn't installed on the repository.
+// Waits before trying again after a permanent failure, and while the App isn't installed.
 const (
 	permanentRetry    = time.Hour
 	notInstalledRetry = time.Hour
 )
 
-// SetPublisher turns publishing on with p, or, with p nil, off, saying why.
-// Call it before Run.
+// SetPublisher turns publishing on with p, or off with p nil, saying why; call it before Run.
 func (o *Orchestrator) SetPublisher(p Publisher, off string) {
 	o.publisher, o.publishOff = p, off
 }
@@ -44,8 +40,7 @@ func (o *Orchestrator) Publishing() (bool, string) {
 	return o.publisher != nil, o.publishOff
 }
 
-// RunPublisher publishes due Releases every PublishEvery and after each
-// deploy that queues one, until ctx is cancelled. Pausing doesn't stop it.
+// RunPublisher publishes due Releases until ctx is cancelled; pausing doesn't stop it.
 func (o *Orchestrator) RunPublisher(ctx context.Context) {
 	if o.publisher == nil {
 		return
@@ -107,8 +102,7 @@ func (o *Orchestrator) publish(ctx context.Context, r projects.Release) projects
 	return res
 }
 
-// tryPublish publishes r's GitHub Release, unless its tag is gone or moved,
-// or one already exists (then it's adopted).
+// tryPublish publishes r's Release, unless its tag is gone or moved, or adopts an existing one.
 func (o *Orchestrator) tryPublish(ctx context.Context, p projects.Project, r projects.Release) projects.Published {
 	now := o.now()
 	again := func(err error) projects.Published {
@@ -165,8 +159,7 @@ func (o *Orchestrator) tryPublish(ctx context.Context, p projects.Project, r pro
 	return projects.Published{Status: projects.ReleasePublished, URL: created.URL, At: created.When(now), Note: strings.Join(append(notes, warnings...), "; ")}
 }
 
-// notes is r's Release text: its CHANGELOG.md section at its commit (or its
-// NotesRef), dated as the CHANGELOG says, or r's NotesDate, or now.
+// notes is r's Release text from the CHANGELOG at its commit or NotesRef, dated as given or now.
 func (o *Orchestrator) notes(ctx context.Context, p projects.Project, r projects.Release, now time.Time) (string, []string, error) {
 	ref := r.SHA
 	if r.NotesRef != "" {
@@ -184,8 +177,7 @@ func (o *Orchestrator) notes(ctx context.Context, p projects.Project, r projects
 	return body, warnings, nil
 }
 
-// latest reports whether v becomes GitHub's "latest" Release: a stable
-// version higher than every stable Release published.
+// latest reports whether v is a stable version higher than every stable Release published.
 func latest(v release.Version, published []github.Release) bool {
 	if v.Prerelease() {
 		return false
@@ -201,9 +193,7 @@ func latest(v release.Version, published []github.Release) bool {
 // ErrPublishingOff means Lighthouse has no GitHub App to publish with.
 var ErrPublishingOff = errors.New("publishing is off")
 
-// Backfill publishes a Release for an existing tag now, without deploying
-// it: its notes from notesRef's CHANGELOG.md if given, dated date if given.
-// If the attempt fails, the release stays queued and is tried again.
+// Backfill publishes tag's Release now without deploying it; a failed attempt stays queued.
 func (o *Orchestrator) Backfill(ctx context.Context, name string, tag string, date string, notesRef string) (projects.Release, error) {
 	if on, why := o.Publishing(); !on {
 		return projects.Release{}, fmt.Errorf("%w: %s", ErrPublishingOff, why)

@@ -128,8 +128,7 @@ func allOrNothing(args []string) bool {
 	return len(args) == 1 || len(args) == 2 && strings.EqualFold(args[1], "all")
 }
 
-// eachProject runs fn for every watched project but publish-only ones,
-// reporting each one, and fails if any failed.
+// eachProject runs fn for every deployed project, reporting each, and fails if any failed.
 func (c *CLI) eachProject(ctx context.Context, verb string, done string, fn func(context.Context, string) error) error {
 	all, err := c.svc.Projects(ctx)
 	if err != nil {
@@ -271,8 +270,7 @@ func printDeployment(d control.Deployment) {
 	}
 }
 
-// result describes how a deploy went: "succeeded", "failed at build",
-// "rolled back at verify".
+// result describes how a deploy went: "succeeded", "failed at build", "rolled back at verify".
 func result(d control.Deployment) string {
 	switch d.Status {
 	case "succeeded":
@@ -287,8 +285,7 @@ func result(d control.Deployment) string {
 	}
 }
 
-// kindNote says what a failure means for the project; a dry run (`check`)
-// records nothing, so it means nothing.
+// kindNote says what a failure means for the project; a dry run records nothing.
 func kindNote(d control.Deployment) string {
 	if d.Trigger == "dry run" {
 		return ""
@@ -302,8 +299,7 @@ func kindNote(d control.Deployment) string {
 	return ""
 }
 
-// took is how long something took, to the second (or the millisecond, under
-// a second).
+// took is how long something took, to the second, or the millisecond under a second.
 func took(start time.Time, end time.Time) string {
 	d := end.Sub(start)
 	if d < time.Second {

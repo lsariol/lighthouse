@@ -22,8 +22,7 @@ import (
 	"github.com/lsariol/lighthouse/internal/settings"
 )
 
-// Deployer deploys a project, or checks it without deploying, and keeps
-// Lighthouse's own updates (hand-offs). *deploy.Deployer implements it.
+// Deployer deploys or checks a project and keeps Lighthouse's own hand-offs, as *deploy.Deployer does.
 type Deployer interface {
 	Deploy(ctx context.Context, req deploy.Request) deploy.Result
 	Check(ctx context.Context, req deploy.Request) deploy.Result
@@ -35,8 +34,7 @@ type Deployer interface {
 // ErrHandedOff means Lighthouse handed its own update to the helper.
 var ErrHandedOff = errors.New("handed off to the update helper")
 
-// ErrUpdating means Lighthouse is updating itself: the update helper hasn't
-// finished, so Lighthouse isn't deployed again meanwhile.
+// ErrUpdating means the update helper hasn't finished, so Lighthouse isn't deployed again meanwhile.
 var ErrUpdating = errors.New("a self-update is in progress")
 
 // GitHub answers what's new in a repository. github.Client implements it.
@@ -53,8 +51,7 @@ type GitHub interface {
 	Releases(ctx context.Context, repo github.Repo, token string) ([]github.Release, error)
 }
 
-// Containers tells the reconcile loop what's running. *docker.Client
-// implements it.
+// Containers tells the reconcile loop what's running, as *docker.Client does.
 type Containers interface {
 	ProjectContainers(ctx context.Context, project string) ([]docker.Container, error)
 	Inspect(ctx context.Context, id string) (docker.Detail, error)
@@ -98,8 +95,7 @@ type Orchestrator struct {
 	publishing  sync.Mutex
 }
 
-// watch is what's remembered about a project between checks. It's only in
-// memory: after a restart, the first check of each project costs a request.
+// watch is what's remembered about a project between checks, in memory only.
 type watch struct {
 	commitETag  string
 	head        string
@@ -113,8 +109,7 @@ type watch struct {
 	downSince   time.Time
 }
 
-// New returns an Orchestrator that checks with gitToken (Lighthouse's GitHub
-// token, read from Cove at startup). A nil log means slog.Default().
+// New returns an Orchestrator that checks with Lighthouse's GitHub token; a nil log means slog.Default().
 func New(store projects.Store, gh GitHub, deployer Deployer, containers Containers, gitToken string, log *slog.Logger) *Orchestrator {
 	if log == nil {
 		log = slog.Default()
@@ -128,12 +123,10 @@ func (o *Orchestrator) Pause()         { o.paused.Store(true) }
 func (o *Orchestrator) Resume()        { o.paused.Store(false) }
 func (o *Orchestrator) IsPaused() bool { return o.paused.Load() }
 
-// ReconcileEvery is how often the reconcile loop looks for projects that are
-// down.
+// ReconcileEvery is how often the reconcile loop looks for projects that are down.
 const ReconcileEvery = time.Minute
 
-// Run scans now and then every interval, and reconciles every ReconcileEvery,
-// until ctx is cancelled.
+// Run scans every interval and reconciles every ReconcileEvery until ctx is cancelled.
 func (o *Orchestrator) Run(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -213,8 +206,7 @@ func (o *Orchestrator) Scan(ctx context.Context) error {
 // errChecksFailed is a scan where a project failed; each one is already logged.
 var errChecksFailed = errors.New("checks failed")
 
-// ErrBroken means a project's latest commit failed BrokenAfter times and
-// isn't tried again until a new commit appears or `retry` clears it.
+// ErrBroken means a commit failed BrokenAfter times and waits for a new commit or `retry`.
 var ErrBroken = errors.New("broken")
 
 // target is what to deploy: a commit, and the release it is, if it is one.
@@ -230,8 +222,7 @@ func (t target) String() string {
 	return short(t.sha)
 }
 
-// check looks at p on GitHub and deploys what's new, unless p is stopped,
-// waiting after a passing failure, or broken by that very commit.
+// check deploys what's new for p, unless it's stopped, waiting after a failure, or broken by that commit.
 func (o *Orchestrator) check(ctx context.Context, p projects.Project) error {
 	w := o.watchOf(p.Name)
 	if p.Stopped || o.now().Before(w.nextAttempt) {
@@ -267,8 +258,7 @@ func (o *Orchestrator) check(ctx context.Context, p projects.Project) error {
 	return o.record(ctx, p.Name, err, true)
 }
 
-// logCheckFailed logs a check that failed before any deploy, which logs its
-// own failure. A passing failure is tried again, so it's only a warning.
+// logCheckFailed logs a check that failed before any deploy, as a warning if it's tried again.
 func (o *Orchestrator) logCheckFailed(ctx context.Context, name string, err error) {
 	level := slog.LevelError
 	if transientErr(err) {
@@ -342,9 +332,7 @@ func (o *Orchestrator) latest(ctx context.Context, p *projects.Project, w *watch
 	return target{sha: next.SHA, version: next.Tag}, true, nil
 }
 
-// trackTags records what's new among p's version tags: the baseline the
-// first time, then each new tag, tags that moved, and waiting tags that
-// reached the default branch. It returns p's tracked tags.
+// trackTags records what's new among p's version tags, and returns p's tracked tags.
 func (o *Orchestrator) trackTags(ctx context.Context, p *projects.Project, w *watch, tags []github.Tag) ([]projects.Release, error) {
 	rows, err := o.store.Releases(ctx, p.Name)
 	if err != nil {
@@ -425,9 +413,7 @@ func (o *Orchestrator) trackTags(ctx context.Context, p *projects.Project, w *wa
 	return rows, nil
 }
 
-// adopt marks the baseline's known tags that already have a GitHub Release
-// as published, so `releases` shows them; a failure only means they show as
-// known.
+// adopt marks baseline tags that already have a GitHub Release as published.
 func (o *Orchestrator) adopt(ctx context.Context, p projects.Project, baseline []projects.Release) {
 	if len(baseline) == 0 {
 		return
@@ -458,8 +444,7 @@ func (o *Orchestrator) adopt(ctx context.Context, p projects.Project, baseline [
 	}
 }
 
-// checkPublishOnly tracks a publish-only project's tags and makes each new
-// stable release on the default branch pending; nothing is deployed.
+// checkPublishOnly makes each new stable release on the default branch pending; nothing is deployed.
 func (o *Orchestrator) checkPublishOnly(ctx context.Context, p projects.Project, w *watch) error {
 	_, err := o.head(ctx, &p, w)
 	if errors.Is(err, github.ErrEmptyRepository) {
@@ -494,8 +479,7 @@ func (o *Orchestrator) checkPublishOnly(ctx context.Context, p projects.Project,
 	return nil
 }
 
-// ErrPublishOnly means a command that deploys or runs containers was given a
-// publish-only project.
+// ErrPublishOnly means a deploy or container command was given a publish-only project.
 var ErrPublishOnly = errors.New("Lighthouse only publishes its GitHub Releases: it isn't deployed")
 
 // deployable returns p, or ErrPublishOnly.
@@ -537,8 +521,7 @@ func (o *Orchestrator) ReleaseNotes(ctx context.Context, name string, tag string
 // notOnBranch is a waiting release's note.
 const notOnBranch = "its commit isn't on the default branch yet (push main first); it deploys once it is"
 
-// nextRelease is the newest ready release newer than any deployed before, so
-// going back by hand sticks.
+// nextRelease is the newest ready release newer than any deployed before, so going back sticks.
 func nextRelease(rows []projects.Release, p projects.Project) (projects.Release, bool) {
 	highest, deployedOne := release.Parse(release.Higher(p.HighestVersion, p.DeployedVersion))
 	var best projects.Release
@@ -556,8 +539,7 @@ func nextRelease(rows []projects.Release, p projects.Project) (projects.Release,
 	return best, found
 }
 
-// readSettings reads the x-lighthouse settings from the compose file at sha
-// and records them.
+// readSettings reads and records the x-lighthouse settings from the compose file at sha.
 func (o *Orchestrator) readSettings(ctx context.Context, p *projects.Project, sha string) error {
 	name, text, err := o.github.ComposeFile(ctx, p.Repo, sha, o.gitToken)
 	if err != nil {
@@ -577,8 +559,7 @@ func (o *Orchestrator) readSettings(ctx context.Context, p *projects.Project, sh
 	return nil
 }
 
-// wait makes automatic deploys of a project wait after a passing failure:
-// a minute, then twice as long each time, up to 30 minutes.
+// wait holds automatic deploys after a passing failure: a minute, doubling, up to 30 minutes.
 func (o *Orchestrator) wait(w *watch, name string, err error) {
 	if !transientErr(err) {
 		w.backoff, w.nextAttempt = 0, time.Time{}
@@ -653,8 +634,7 @@ func (o *Orchestrator) deployByHand(ctx context.Context, p projects.Project, t t
 	return o.deploy(ctx, p, t, trigger)
 }
 
-// hold records what a project that deploys its branch went back from, so
-// checks don't deploy it again.
+// hold records what a branch-deployed project went back from, so checks don't deploy it again.
 func (o *Orchestrator) hold(ctx context.Context, p projects.Project, t target, latest bool) error {
 	held := ""
 	if !latest && p.Mode != settings.DeployReleases {
@@ -678,8 +658,7 @@ func (o *Orchestrator) hold(ctx context.Context, p projects.Project, t target, l
 	return nil
 }
 
-// Rollback deploys again what ran before the current version: the newest
-// successful deploy of something else.
+// Rollback deploys the newest successful deploy of something other than the current version.
 func (o *Orchestrator) Rollback(ctx context.Context, name string) (string, error) {
 	p, err := deployable(o.store.Get(ctx, name))
 	if err != nil {
@@ -701,8 +680,7 @@ func (o *Orchestrator) Rollback(ctx context.Context, name string) (string, error
 // ErrNothingToRollBackTo means a project has no earlier successful deploy.
 var ErrNothingToRollBackTo = errors.New("no earlier successful deploy to go back to")
 
-// manualTarget is what `deploy` and `check` act on: ref (a tag or a commit),
-// or the newest release or commit.
+// manualTarget is what `deploy` and `check` act on: ref, or the newest release or commit.
 func (o *Orchestrator) manualTarget(ctx context.Context, p projects.Project, ref string) (target, error) {
 	if ref == "" {
 		head, err := o.github.LatestCommit(ctx, p.Repo, o.gitToken)
@@ -757,9 +735,7 @@ type Checked struct {
 	Note    string
 }
 
-// Check dry-runs the deploy's checks on ref (a tag or a commit), or on what
-// a deploy would take: the newest release, or the newest commit before the
-// first release exists.
+// Check dry-runs ref, or the newest release, or the newest commit before the first release.
 func (o *Orchestrator) Check(ctx context.Context, name string, ref string) (deploy.Result, Checked, error) {
 	p, err := deployable(o.store.Get(ctx, name))
 	if err != nil {
@@ -810,8 +786,7 @@ func (o *Orchestrator) Retry(ctx context.Context, name string) error {
 	return o.deployRef(ctx, name, "", projects.TriggerRetry)
 }
 
-// RecordHandOffs records Lighthouse's own updates once the helper has
-// finished them (or given up), as any deploy is recorded.
+// RecordHandOffs records Lighthouse's own updates once the helper has finished or given up.
 func (o *Orchestrator) RecordHandOffs(ctx context.Context) {
 	o.recording.Lock()
 	defer o.recording.Unlock()
@@ -943,8 +918,7 @@ func (o *Orchestrator) awaitHandOff(name string) {
 	}
 }
 
-// recordRetries is how long recording a deployment keeps trying while the
-// database is away: deploying sparkdb takes Lighthouse's database down too.
+// recordRetries is how long recording waits for the database, which a sparkdb deploy takes down.
 const recordRetries = 2 * time.Minute
 
 func (o *Orchestrator) recordDeployment(ctx context.Context, d projects.Deployment) {

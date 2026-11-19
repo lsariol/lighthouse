@@ -21,23 +21,19 @@ type Input struct {
 	Resolve func(path string) string
 }
 
-// readOnlyHostFiles may be mounted read-only by anyone: they're harmless, and
-// common (a container's time zone).
+// readOnlyHostFiles may be mounted read-only by anyone, such as a container's time zone.
 var readOnlyHostFiles = map[string]bool{"/etc/localtime": true, "/etc/timezone": true}
 
-// URLLabel is the label on a service that's reached from outside: its public
-// https:// address, for Sonar and the status page.
+// URLLabel carries a public service's https:// address, for Sonar and the status page.
 const URLLabel = "com.mobasity.public-url"
 
-// publicURL reports whether v is a full https:// URL with a host and no
-// user or password.
+// publicURL reports whether v is a full https:// URL with a host and no user or password.
 func publicURL(v string) bool {
 	u, err := url.Parse(v)
 	return err == nil && u.Scheme == "https" && u.Hostname() != "" && u.User == nil && !strings.ContainsAny(v, " \t\n")
 }
 
-// Check returns everything in the compose file the rules refuse or warn
-// about.
+// Check returns everything in the compose file the rules refuse or warn about.
 func Check(in Input) ([]Finding, error) {
 	var cfg config
 	if err := json.Unmarshal(in.Config, &cfg); err != nil {
@@ -135,8 +131,7 @@ type build struct {
 	Entitlements       []string          `json:"entitlements"`
 }
 
-// pathItem is a path written either as a string or as an object with a
-// source or path (Compose versions differ).
+// pathItem is a path written as a string or as an object with a source or path.
 type pathItem string
 
 func (p *pathItem) UnmarshalJSON(b []byte) error {
@@ -298,8 +293,7 @@ func (c *checker) namespace(service string, field string, value string) {
 	}
 }
 
-// hostMount allows a bind mount from the repository's files or the project's
-// data folder.
+// hostMount allows a bind mount from the repository's files or the project's data folder.
 func (c *checker) hostMount(service string, source string, readOnly bool) {
 	ok, link := c.inside(source)
 	path := filepath.ToSlash(filepath.Clean(source))
@@ -324,8 +318,7 @@ func (c *checker) hostMount(service string, source string, readOnly bool) {
 	}
 }
 
-// file allows a file the compose file reads from the repository or the
-// project's data folder.
+// file allows a file read from the repository or the project's data folder.
 func (c *checker) file(service string, what string, source string) {
 	ok, link := c.inside(source)
 	path := filepath.ToSlash(filepath.Clean(source))
@@ -338,8 +331,7 @@ func (c *checker) file(service string, what string, source string) {
 	}
 }
 
-// buildContext allows a local build context inside the repository; a remote
-// one (a Git URL) is fetched by the build and can't reach the host.
+// buildContext allows a build context inside the repository, or a remote one.
 func (c *checker) buildContext(service string, what string, ctx string) {
 	if isLocal(ctx) {
 		c.file(service, what, ctx)
@@ -391,8 +383,7 @@ func within(root string, path string) bool {
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel))
 }
 
-// project checks what the services share: volumes, networks, and the files
-// behind secrets and configs.
+// project checks what the services share: volumes, networks, and secrets' and configs' files.
 func (c *checker) project() {
 	own := c.in.Project + "_"
 
@@ -447,14 +438,12 @@ func (c *checker) secrets() {
 	}
 }
 
-// SecretPrefix is the start of a compose project's own Cove keys: "website"
-// has WEBSITE_*, "my-site" MY_SITE_*.
+// SecretPrefix is the start of a compose project's own Cove keys: "my-site" has MY_SITE_*.
 func SecretPrefix(project string) string {
 	return strings.ToUpper(strings.ReplaceAll(project, "-", "_")) + "_"
 }
 
-// names refuses names on the shared network that another project's
-// container already answers to: Docker's DNS would send requests to either.
+// names refuses names on the shared network that another project's container already answers to.
 func (c *checker) names(service string, s service) {
 	for netKey, settings := range s.Networks {
 		if !c.isShared(netKey) {
@@ -498,8 +487,7 @@ func sortedKeys[V any](m map[string]V) []string {
 	return keys
 }
 
-// ResolvePath follows symlinks in path as far as it exists; the rest (a
-// folder Docker will create) is joined on unchanged.
+// ResolvePath follows symlinks in path as far as it exists, and joins the rest unchanged.
 func ResolvePath(path string) string {
 	rest := ""
 	for p := path; ; p = filepath.Dir(p) {

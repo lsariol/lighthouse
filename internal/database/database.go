@@ -20,8 +20,7 @@ type Database struct {
 	pool *pgxpool.Pool
 }
 
-// Connect opens a pool for connString (LIGHTHOUSE_DATABASE_URL) and checks
-// that the database answers.
+// Connect opens a pool for LIGHTHOUSE_DATABASE_URL and checks that the database answers.
 func Connect(ctx context.Context, connString string) (*Database, error) {
 	cfg, err := poolConfig(connString)
 	if err != nil {
@@ -64,8 +63,7 @@ func (d *Database) Close() {
 	d.pool.Close()
 }
 
-// IsUnreachable reports whether err means the database couldn't be reached at
-// all (down, restarting, wrong host), as opposed to an error from it.
+// IsUnreachable reports whether err means the database couldn't be reached at all.
 func IsUnreachable(err error) bool {
 	var connectErr *pgconn.ConnectError
 	if !errors.As(err, &connectErr) {

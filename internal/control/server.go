@@ -201,8 +201,7 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 	return true
 }
 
-// Serve listens on the Unix socket at path and serves svc until ctx is
-// cancelled.
+// Serve serves svc on the Unix socket at path until ctx is cancelled.
 func Serve(ctx context.Context, path string, svc Service, log *slog.Logger) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("control socket: %w", err)

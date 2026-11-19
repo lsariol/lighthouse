@@ -11,8 +11,7 @@ import (
 	"golang.org/x/term"
 )
 
-// runTerminal runs the prompt with line editing: arrow keys, history
-// (up/down) and Tab completion of command and project names.
+// runTerminal runs the prompt with line editing, history and Tab completion.
 func (c *CLI) runTerminal(ctx context.Context) bool {
 	fd := int(os.Stdin.Fd())
 
@@ -127,8 +126,7 @@ func (c *CLI) projectNamesOrAll() []string {
 	return append(c.projectNames(), "all")
 }
 
-// projectTargets is every project's name and every "<name>:<service>", for
-// the container commands.
+// projectTargets is every project's name and every "<name>:<service>".
 func (c *CLI) projectTargets() []string {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

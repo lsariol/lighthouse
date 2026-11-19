@@ -8,8 +8,7 @@ import (
 	"sync"
 )
 
-// minSecretLength is the shortest secret value that's hidden in output.
-// Hiding shorter ones would garble ordinary words and numbers.
+// minSecretLength is the shortest secret hidden in output; shorter ones would garble ordinary text.
 const minSecretLength = 4
 
 // hidden replaces a secret value in output.

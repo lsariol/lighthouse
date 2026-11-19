@@ -9,8 +9,7 @@ import (
 	"time"
 )
 
-// The heading styles in use: Lighthouse and SparkDB now, Lighthouse before
-// 2026-10-20, and one still undated.
+// The heading styles in use: Lighthouse and SparkDB now, older Lighthouse, and one undated.
 const sample = "# Changelog\r\n\r\nAll notable changes.\r\n\r\n" +
 	"## v1.3.0 (2026-10-20)\r\n\r\nShort summary.\r\n\r\n### Added\r\n- **A thing.** Details.\r\n\r\n" +
 	"## v1.2.0\r\n\r\n### Fixed\r\n- Undated.\r\n\r\n" +

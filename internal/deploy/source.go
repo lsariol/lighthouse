@@ -11,12 +11,10 @@ import (
 	"strings"
 )
 
-// MaxArchiveSize is the most a repository may unpack to. It protects the
-// server's disk from a runaway archive.
+// MaxArchiveSize is the most a repository may unpack to, to protect the server's disk.
 const MaxArchiveSize = 2 << 30 // 2 GB
 
-// extract unpacks a GitHub tarball (gzipped tar, every entry in one top-level
-// folder) into dest, dropping that folder.
+// extract unpacks a GitHub tarball into dest, dropping its one top-level folder.
 func extract(r io.Reader, dest string) error {
 	gz, err := gzip.NewReader(r)
 	if err != nil {

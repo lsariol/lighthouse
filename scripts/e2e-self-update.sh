@@ -1,9 +1,5 @@
 #!/bin/sh
-# Runs the self-update end to end against the local Docker
-# (internal/deploy TestRealSelfUpdate): builds the Lighthouse image, then runs
-# the test inside a container from it, with the Docker socket, because the
-# update helper mounts the deploy folder at the same path as Lighthouse.
-# Everything it creates is removed afterwards. Run from the repository's top.
+# Runs TestRealSelfUpdate in a container of the Lighthouse image, with the Docker socket; run from the top.
 set -eu
 
 base=lighthouse-e2e-base

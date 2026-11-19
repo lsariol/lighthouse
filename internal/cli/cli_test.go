@@ -45,8 +45,7 @@ func (f *fakeService) Projects(ctx context.Context) ([]control.Project, error) {
 	return f.projects, nil
 }
 
-// Add names a project after the repository when name is "", and refuses a
-// name that's taken, as the daemon does.
+// Add names a project after the repository when name is "", and refuses a taken name.
 func (f *fakeService) Add(ctx context.Context, name, url string, publishOnly bool) (control.Project, error) {
 	if name == "" {
 		name = url[strings.LastIndex(url, "/")+1:]
@@ -147,8 +146,7 @@ func (f *fakeService) Publish(ctx context.Context, name string, tag string, date
 		Note: "published with `publish`, not verified by a deploy"}, nil
 }
 
-// run executes one command line on a CLI without a terminal and returns its
-// stdout, stderr and error.
+// run executes one command line without a terminal and returns stdout, stderr and the error.
 func run(t *testing.T, svc control.Service, line string) (string, string, error) {
 	t.Helper()
 	var o, e bytes.Buffer
@@ -446,8 +444,7 @@ func TestPublishOnlyProjects(t *testing.T) {
 	}
 }
 
-// Without a terminal, destructive commands refuse instead of guessing, and
-// --yes goes ahead.
+// Without a terminal, destructive commands refuse, and --yes goes ahead.
 func TestConfirmation(t *testing.T) {
 	for _, line := range []string{"remove plop", "stop plop", "stop all", "restart all", "deploy all"} {
 		svc := newFake("plop")
@@ -523,8 +520,7 @@ func TestAddNames(t *testing.T) {
 	}
 }
 
-// runAnswering runs line as if on a terminal, answering its questions with
-// input.
+// runAnswering runs line as if on a terminal, answering its questions with input.
 func runAnswering(t *testing.T, svc control.Service, line string, input string) (string, error) {
 	t.Helper()
 	var o, e bytes.Buffer

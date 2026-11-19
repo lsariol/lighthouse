@@ -58,8 +58,7 @@ func New(svc control.Service, opts Options) *CLI {
 	return c
 }
 
-// Run reads and runs commands until stdin closes, `exit` is typed, or ctx is
-// cancelled.
+// Run reads and runs commands until stdin closes, `exit` is typed, or ctx is cancelled.
 func (c *CLI) Run(ctx context.Context, stop func()) {
 	c.leave = stop
 
@@ -84,8 +83,7 @@ func (c *CLI) Run(ctx context.Context, stop func()) {
 	}
 }
 
-// checkDaemon warns when the daemon can't be reached, so the first command
-// doesn't come as a surprise.
+// checkDaemon warns up front when the daemon can't be reached.
 func (c *CLI) checkDaemon(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
@@ -103,8 +101,7 @@ func (c *CLI) Exec(ctx context.Context, args []string) error {
 	return cmd.run(c, ctx, args)
 }
 
-// Report shows an error returned by Exec: wrong arguments as a warning,
-// anything else as an error.
+// Report shows an error from Exec: wrong arguments as a warning, anything else as an error.
 func Report(err error) {
 	report(err)
 }
@@ -185,8 +182,7 @@ func takeYesFlag(args []string) (bool, []string) {
 	return takeFlag(args, "--yes", "-y")
 }
 
-// takeValue removes a flag and its value ("--name x" or "--name=x") from
-// args.
+// takeValue removes a flag and its value ("--name x" or "--name=x") from args.
 func takeValue(args []string, flag string) (string, []string, error) {
 	value := ""
 	rest := make([]string, 0, len(args))
@@ -211,8 +207,7 @@ func takeValue(args []string, flag string) (string, []string, error) {
 	return value, rest, nil
 }
 
-// takeFlag removes every spelling of a flag from args and reports whether it
-// was there.
+// takeFlag removes every spelling of a flag from args and reports whether it was there.
 func takeFlag(args []string, spellings ...string) (bool, []string) {
 	found := false
 	rest := make([]string, 0, len(args))

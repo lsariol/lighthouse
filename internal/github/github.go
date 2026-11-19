@@ -1,5 +1,4 @@
-// Package github is what Lighthouse needs from GitHub: parsing repository
-// URLs, finding a repository's latest commit, and downloading a commit.
+// Package github parses repository URLs, finds commits and tags, downloads code and publishes Releases.
 package github
 
 import (
@@ -53,8 +52,7 @@ func ParseRepoURL(raw string) (Repo, error) {
 // DefaultAPI is GitHub's REST API.
 const DefaultAPI = "https://api.github.com"
 
-// Client calls the GitHub REST API. The zero value uses http.DefaultClient
-// and DefaultAPI; set HTTP for timeouts.
+// Client calls the GitHub REST API; set HTTP for timeouts.
 type Client struct {
 	HTTP *http.Client
 	API  string
@@ -103,8 +101,7 @@ func (e *Error) Temporary() bool {
 		e.Status == http.StatusForbidden && strings.Contains(e.Err.Error(), "rate limit")
 }
 
-// ErrNotModified means GitHub's answer hasn't changed since the ETag given.
-// Such a request doesn't count against the rate limit.
+// ErrNotModified means the answer hasn't changed since the ETag; it doesn't count against the rate limit.
 var ErrNotModified = errors.New("not modified")
 
 // get sends an authenticated GET and returns the response if it's 200 OK.
@@ -112,8 +109,7 @@ func (c Client) get(ctx context.Context, op string, url string, token string, ac
 	return c.send(ctx, http.MethodGet, op, url, token, accept, etag, nil, http.StatusOK)
 }
 
-// send sends an authenticated request, with body as JSON unless it's nil,
-// and returns the response if its status is one of ok.
+// send sends an authenticated request, body as JSON unless nil, and returns the response if its status is in ok.
 func (c Client) send(ctx context.Context, method string, op string, url string, token string, accept string, etag string, body any, ok ...int) (*http.Response, error) {
 	if token == "" {
 		return nil, &Error{Op: op, Err: errors.New("no GitHub token yet (Lighthouse is still waiting for Cove)")}
@@ -218,8 +214,7 @@ func (c Client) LatestCommit(ctx context.Context, repo Repo, token string) (stri
 	return sha, err
 }
 
-// CheckCommit is LatestCommit for polling: given the ETag of the last
-// answer, it returns ErrNotModified if nothing changed, and the new ETag.
+// CheckCommit is LatestCommit for polling: ErrNotModified if nothing changed since etag, else the new ETag.
 func (c Client) CheckCommit(ctx context.Context, repo Repo, token string, etag string) (string, string, error) {
 	op := "check " + repo.String() + " for its newest commit"
 	resp, err := c.get(ctx, op, c.url(repo, "/commits?per_page=1"), token, "application/vnd.github+json", etag)
@@ -244,8 +239,7 @@ func (c Client) CheckCommit(ctx context.Context, repo Repo, token string, etag s
 	return commits[0].SHA, resp.Header.Get("ETag"), nil
 }
 
-// ResolveCommit returns the full SHA of a commit given as a full or short
-// SHA (or any ref GitHub understands).
+// ResolveCommit returns the full SHA of a full or short SHA, or any ref GitHub understands.
 func (c Client) ResolveCommit(ctx context.Context, repo Repo, ref string, token string) (string, error) {
 	op := fmt.Sprintf("find commit %q in %s", ref, repo)
 	resp, err := c.get(ctx, op, c.url(repo, "/commits/"+url.PathEscape(ref)), token, "application/vnd.github+json", "")
@@ -262,8 +256,7 @@ func (c Client) ResolveCommit(ctx context.Context, repo Repo, ref string, token 
 	return commit.SHA, nil
 }
 
-// Archive returns the repository's files at commit sha, as a gzipped tarball
-// whose entries all sit in one top-level folder.
+// Archive returns the repository at sha as a gzipped tarball with one top-level folder.
 func (c Client) Archive(ctx context.Context, repo Repo, sha string, token string) (io.ReadCloser, error) {
 	op := fmt.Sprintf("download %s at %.7s", repo, sha)
 	resp, err := c.get(ctx, op, c.url(repo, "/tarball/"+sha), token, "application/vnd.github+json", "")
@@ -282,8 +275,7 @@ type Tag struct {
 // maxTagPages caps how many pages of 100 tags are read.
 const maxTagPages = 10
 
-// Tags lists the repository's tags, with the commit each points at (annotated
-// tags included).
+// Tags lists the repository's tags with the commit each points at.
 func (c Client) Tags(ctx context.Context, repo Repo, token string, etag string) ([]Tag, string, error) {
 	op := "list " + repo.String() + "'s tags"
 	page := c.url(repo, "/tags?per_page=100")
@@ -334,8 +326,7 @@ func nextPage(link string) string {
 // ComposeFiles are the names Compose looks for, in its order.
 var ComposeFiles = []string{"compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"}
 
-// ComposeFile returns the compose file at the top of the repository at a
-// commit, and its name, without downloading the rest.
+// ComposeFile returns the compose file at the top of the repository at sha, and its name.
 func (c Client) ComposeFile(ctx context.Context, repo Repo, sha string, token string) (string, []byte, error) {
 	op := fmt.Sprintf("read the compose file of %s at %.7s", repo, sha)
 	for _, name := range ComposeFiles {
@@ -349,8 +340,7 @@ func (c Client) ComposeFile(ctx context.Context, repo Repo, sha string, token st
 	return "", nil, &Error{Op: op, Status: http.StatusNotFound, Err: fmt.Errorf("there's no compose file at the top of the repository (%s)", strings.Join(ComposeFiles, ", "))}
 }
 
-// File returns a file at the top of the repository at a commit, or nil if
-// there's no such file.
+// File returns a file at the top of the repository at sha, or nil if there's none.
 func (c Client) File(ctx context.Context, repo Repo, sha string, name string, token string) ([]byte, error) {
 	text, err := c.file(ctx, fmt.Sprintf("read %s of %s at %.7s", name, repo, sha), repo, sha, name, token)
 	var gh *Error
@@ -373,8 +363,7 @@ func (c Client) file(ctx context.Context, op string, repo Repo, sha string, name
 	return text, nil
 }
 
-// Contains reports whether commit sha is in the history of head (a commit
-// or a branch), such as a tag's commit on the default branch.
+// Contains reports whether sha is in the history of head, a commit or a branch.
 func (c Client) Contains(ctx context.Context, repo Repo, head string, sha string, token string) (bool, error) {
 	op := fmt.Sprintf("check whether %.7s is in the history of %.7s in %s", sha, head, repo)
 	resp, err := c.get(ctx, op, c.url(repo, "/compare/"+url.PathEscape(sha)+"..."+url.PathEscape(head)+"?per_page=1"), token, "application/vnd.github+json", "")

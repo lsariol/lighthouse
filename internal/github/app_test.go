@@ -20,8 +20,7 @@ import (
 	"time"
 )
 
-// fakeAppGitHub is GitHub for the App: it checks the sign-in token against
-// key, has the App installed on o/good only, and keeps Releases.
+// fakeAppGitHub checks the App's sign-in token, is installed on o/good only, and keeps Releases.
 type fakeAppGitHub struct {
 	mu       sync.Mutex
 	key      *rsa.PublicKey

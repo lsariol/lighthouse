@@ -1,5 +1,4 @@
-// Package config reads Lighthouse's settings from the environment. It is the
-// only package that does; everything else gets a Config.
+// Package config is the only package that reads Lighthouse's settings from the environment.
 package config
 
 import (
@@ -14,8 +13,7 @@ import (
 	"github.com/joho/godotenv"
 )
 
-// Config holds every setting Lighthouse reads. In Docker they come from the
-// compose file's environment; for local development, from a .env file.
+// Config holds every setting, from the compose file's environment or a local .env file.
 type Config struct {
 	CoveURL       string
 	CoveTokenPath string
@@ -133,8 +131,7 @@ func (c Config) ValidateServe() error {
 	return nil
 }
 
-// checkWorkFolder refuses folders whose contents must never be deleted: the
-// filesystem root, the current directory, and a few well-known system folders.
+// checkWorkFolder refuses folders whose contents must never be deleted, such as / and system folders.
 func checkWorkFolder(path string) error {
 	clean := filepath.Clean(path)
 	if clean == "." || clean == ".." {

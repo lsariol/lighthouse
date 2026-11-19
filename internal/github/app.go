@@ -18,12 +18,10 @@ import (
 	"time"
 )
 
-// ErrNotInstalled means the GitHub App isn't installed on a repository, so
-// nothing is published there.
+// ErrNotInstalled means the GitHub App isn't installed on a repository, so nothing is published there.
 var ErrNotInstalled = errors.New("the GitHub App isn't installed on the repository")
 
-// App signs in as a GitHub App Lighthouse's owner created, and publishes
-// Releases with short-lived installation tokens, one repository at a time.
+// App signs in as Lighthouse's GitHub App and publishes Releases with short-lived installation tokens.
 type App struct {
 	ID   string                                    // the App ID
 	Key  func(ctx context.Context) ([]byte, error) // its private key: the .pem file, or that file in base64
@@ -42,8 +40,7 @@ type appToken struct {
 	expires time.Time
 }
 
-// tokenMargin is how long before it expires an installation token is
-// replaced.
+// tokenMargin is how long before it expires an installation token is replaced.
 const tokenMargin = 5 * time.Minute
 
 func (a *App) client() Client {
@@ -58,8 +55,7 @@ func (a *App) now() time.Time {
 	return time.Now()
 }
 
-// Publish creates a Release in repo with an installation token.
-// ErrNotInstalled if the App isn't installed there.
+// Publish creates a Release in repo, or returns ErrNotInstalled.
 func (a *App) Publish(ctx context.Context, repo Repo, r NewRelease) (Release, error) {
 	token, err := a.Token(ctx, repo)
 	if err != nil {
@@ -113,8 +109,7 @@ func (a *App) Token(ctx context.Context, repo Repo) (string, error) {
 	return t.Token, nil
 }
 
-// jwt signs the App's short-lived sign-in token (RS256, valid 9 minutes,
-// backdated one for clock drift).
+// jwt signs the App's sign-in token: RS256, valid 9 minutes, backdated one for clock drift.
 func (a *App) jwt(ctx context.Context) (string, error) {
 	if a.signer == nil {
 		pemText, err := a.Key(ctx)
@@ -143,8 +138,7 @@ func (a *App) jwt(ctx context.Context) (string, error) {
 	return signed + "." + enc.EncodeToString(sig), nil
 }
 
-// ParseAppKey reads a GitHub App's private key: the .pem file GitHub gives,
-// or that file encoded in base64.
+// ParseAppKey reads a GitHub App's private key, as the .pem file or that file in base64.
 func ParseAppKey(text []byte) (*rsa.PrivateKey, error) {
 	text = []byte(strings.TrimSpace(string(text)))
 	if !strings.HasPrefix(string(text), "-----BEGIN") {

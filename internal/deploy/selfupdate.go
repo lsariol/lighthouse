@@ -15,8 +15,7 @@ import (
 	"github.com/lsariol/lighthouse/internal/projects"
 )
 
-// Self-update: Lighthouse deploying itself, with the swap left to a helper
-// container started from the new image.
+// Self-update: Lighthouse deploying itself, swapped by a helper container started from the new image.
 
 // HelperName is the update helper's container.
 const HelperName = "lighthouse-updater"
@@ -24,12 +23,10 @@ const HelperName = "lighthouse-updater"
 // StepHandOff hands a self-update to the helper.
 const StepHandOff = "handoff"
 
-// HandOffWait is how long a hand-off may stay unfinished before it's
-// recorded as failed: the helper died, or was never started.
+// HandOffWait is how long a hand-off may stay unfinished before it's recorded as failed.
 const HandOffWait = 30 * time.Minute
 
-// HandOff is a self-update in progress: what the helper needs, and, once
-// it's done, how it went.
+// HandOff is a self-update in progress: what the helper needs, and how it went.
 type HandOff struct {
 	Path string `json:"-"`
 
@@ -44,8 +41,7 @@ type HandOff struct {
 	StartedAt      time.Time         `json:"startedAt"`
 	Steps          []projects.Step   `json:"steps"`
 
-	// The secrets' names only: their values reach the helper in its
-	// environment (SecretPrefix, PreviousSecretPrefix), never on disk.
+	// Secrets are names only: the values reach the helper in its environment, never on disk.
 	Secrets         []string `json:"secrets,omitempty"`
 	PreviousSecrets []string `json:"previousSecrets,omitempty"`
 
@@ -68,15 +64,13 @@ func (h HandOff) Deployment() projects.Deployment {
 
 func (d *Deployer) handOffDir() string { return filepath.Join(d.root, ".self-update") }
 
-// The helper's environment variables that carry the secrets, KEY's value in
-// SecretPrefix+KEY: the new version's, and the one before's for a rollback.
+// The helper's variables holding KEY's value: the new version's, and the previous one's for a rollback.
 const (
 	SecretPrefix         = "HANDOFF_SECRET_"
 	PreviousSecretPrefix = "HANDOFF_PREVIOUS_SECRET_"
 )
 
-// handOff writes the hand-off and starts the helper from the new image.
-// secrets and r.prevEnv (KEY=value) go to the helper in its environment.
+// handOff writes the hand-off and starts the helper, passing it the secrets in its environment.
 func (r *run) handOff(ctx context.Context, project compose.Project, dir string, secrets []string, out io.Writer) *failure {
 	if r.prevEnv == nil && len(r.previous) > 0 && r.currentDir(project.Name) != "" {
 		return transient(errors.New("the previous version's secrets couldn't be fetched from Cove, so a rollback couldn't start it again; the update is tried again later"))
@@ -144,8 +138,7 @@ func prefixed(prefix string, env []string) []string {
 	return out
 }
 
-// handOffSecrets reads the secrets named in h from the helper's environment,
-// as KEY=value lines, and their values for hiding in output.
+// handOffSecrets reads the named secrets from the helper's environment, as lines and values to hide.
 func handOffSecrets(prefix string, names []string) ([]string, map[string]string, error) {
 	env := []string{}
 	values := map[string]string{}
@@ -283,8 +276,7 @@ func (d *Deployer) handOffs() ([]HandOff, error) {
 	return all, nil
 }
 
-// HandOffs returns the self-updates that are ready to record: finished by
-// the helper, or unfinished for too long (recorded as failed).
+// HandOffs returns the self-updates ready to record: finished, or unfinished for too long.
 func (d *Deployer) HandOffs() ([]HandOff, error) {
 	all, err := d.handOffs()
 	if err != nil {
@@ -321,9 +313,7 @@ func (d *Deployer) HandOffInProgress(project string) bool {
 	return false
 }
 
-// Forget deletes a recorded hand-off, and after a successful update the
-// helper's container too: its configuration keeps the secrets it was given.
-// A failed update's helper stays for its logs, until the next update.
+// Forget deletes a recorded hand-off, and after a success the helper, whose configuration has the secrets.
 func (d *Deployer) Forget(h HandOff) error {
 	if err := os.Remove(h.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("self-update: remove %s: %w", h.Path, err)
@@ -338,15 +328,13 @@ func (d *Deployer) Forget(h HandOff) error {
 	return nil
 }
 
-// The variables every deploy gives Compose (they aren't secrets), so a
-// compose file can label what it runs: ${LIGHTHOUSE_DEPLOY_VERSION:-dev}.
+// The variables every deploy gives Compose, so a compose file can label what it runs.
 const (
 	DeployCommitVar  = "LIGHTHOUSE_DEPLOY_COMMIT"
 	DeployVersionVar = compose.VersionVar
 )
 
-// deployVars are the deploy's variables: the commit, and the release (or
-// the commit's first 7 characters).
+// deployVars are the deploy's variables: the commit, and the release or short commit.
 func deployVars(sha string, version string) []string {
 	if version == "" {
 		version = short(sha)

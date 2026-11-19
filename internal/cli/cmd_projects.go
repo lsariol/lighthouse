@@ -53,8 +53,7 @@ func (c *CLI) list(ctx context.Context, args []string) error {
 	return nil
 }
 
-// mode says what Lighthouse does with p, and its tier if it isn't an app:
-// "tags", "commits, infra", "publish-only".
+// mode says what Lighthouse does with p, with its tier if it isn't an app: "commits, infra".
 func mode(p control.Project) string {
 	if p.Kind == "publish" {
 		return "publish-only"
@@ -69,8 +68,7 @@ func mode(p control.Project) string {
 	return s
 }
 
-// version is what p runs or last published: its release, else its commit,
-// or "-"; ", stopped" when stopped on purpose.
+// version is what p runs or last published, or "-", with ", stopped" when stopped on purpose.
 func version(p control.Project) string {
 	v := p.Version
 	if v == "" {
@@ -82,8 +80,7 @@ func version(p control.Project) string {
 	return v
 }
 
-// newestDeployFirst orders projects by last deploy, newest first, with
-// never-deployed projects last.
+// newestDeployFirst orders projects by last deploy, newest first, never-deployed last.
 func newestDeployFirst(a, b control.Project) int {
 	switch {
 	case a.LastDeployed == nil && b.LastDeployed == nil:

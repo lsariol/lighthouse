@@ -80,8 +80,7 @@ func (r *run) checkServices(ctx context.Context, project compose.Project, stable
 	return pending, nil
 }
 
-// serviceState judges one container: "" if it's up, a reason if it may still
-// come up, or a failure if it won't.
+// serviceState judges a container: "" if up, a reason if it may still come up, or a failure.
 func (r *run) serviceState(service string, id string, d docker.Detail, stableSince map[string]time.Time, firstRestarts int) (string, *failure) {
 	oneOff := d.RestartPolicy == "" || d.RestartPolicy == "no"
 

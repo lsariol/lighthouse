@@ -277,8 +277,7 @@ func TestServiceExceptions(t *testing.T) {
 	}
 }
 
-// A read-only exception allows only a read-only mount, and says so when the
-// mount writes; a read-write one allows either.
+// A read-only exception allows only a read-only mount; a read-write one allows either.
 func TestMountModes(t *testing.T) {
 	p, err := Parse([]byte(`{"exceptions": [
 		{"project": "sonar", "service": "agent", "allow": ["mount:/proc/1/net/dev:ro", "mount:/srv/data:rw"], "reason": "r"}]}`))

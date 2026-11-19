@@ -13,9 +13,7 @@ import (
 	"github.com/lsariol/lighthouse/internal/projects"
 )
 
-// TestRealDeployAndRollback deploys a small project with the real docker
-// compose and Docker: version 1, then a version 2 that never becomes healthy,
-// which must be rolled back to version 1.
+// TestRealDeployAndRollback deploys with real Docker, then rolls back a version that isn't healthy.
 func TestRealDeployAndRollback(t *testing.T) {
 	if testing.Short() {
 		t.Skip("-short")

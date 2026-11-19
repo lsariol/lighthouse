@@ -7,33 +7,23 @@ import (
 	"time"
 )
 
-// Service is everything the CLI can ask the daemon to do. Methods return an
-// *Error for problems the user can fix (a wrong name, a duplicate URL).
+// Service is everything the CLI can ask the daemon; an *Error is a problem the user can fix.
 type Service interface {
 	Status(ctx context.Context) (Status, error)
 	Projects(ctx context.Context) ([]Project, error)
 
-	// Add starts watching the repository at url: to deploy it, or with
-	// publishOnly only to publish its GitHub Releases. With name "", the
-	// project is named after the repository (lowercased); a clash is a
-	// KindNameTaken error, and the caller can try again with a name.
+	// Add watches url, to deploy or only publish; name "" means the repository's, and a clash is KindNameTaken.
 	Add(ctx context.Context, name string, url string, publishOnly bool) (Project, error)
-	// Remove stops watching a project; with down, its containers are
-	// stopped and removed too.
+	// Remove stops watching a project; with down, its containers are removed too.
 	Remove(ctx context.Context, name string, down bool) error
 	Rename(ctx context.Context, name string, newName string) error
 	SetURL(ctx context.Context, name string, url string) error
 
-	// Deploy deploys a project now: ref (a tag, or a commit's full or short
-	// SHA), or else its newest release (release mode) or its branch's newest
-	// commit.
+	// Deploy deploys ref (a tag or commit) now, or else the newest release or commit.
 	Deploy(ctx context.Context, name string, ref string) error
-	// Rollback deploys again what ran before the current version, and says
-	// what that was ("v1.1.0 (abc1234)" or "abc1234").
+	// Rollback deploys what ran before the current version, and says what that was.
 	Rollback(ctx context.Context, name string) (string, error)
-	// Check runs the project's latest commit through the deploy's checks
-	// (the rules and the test stage) without deploying it. The result, with
-	// its steps, isn't recorded in the history.
+	// Check runs ref, or what a deploy would take, through the deploy's checks without recording it.
 	Check(ctx context.Context, name string, ref string) (Deployment, error)
 	// Retry clears a project's failures and broken state, and deploys it.
 	Retry(ctx context.Context, name string) error
@@ -41,8 +31,7 @@ type Service interface {
 	Pause(ctx context.Context) error
 	Resume(ctx context.Context) error
 
-	// Start, Stop, Restart and Logs take a target: a project's name (every
-	// service) or "<project>:<service>" (one).
+	// Start, Stop, Restart and Logs take "<project>" (every service) or "<project>:<service>".
 	Start(ctx context.Context, target string) error
 	Stop(ctx context.Context, target string) error
 	Restart(ctx context.Context, target string) error
@@ -56,9 +45,7 @@ type Service interface {
 	Releases(ctx context.Context, name string) ([]Release, error)
 	// ReleaseNotes shows what a tracked tag's GitHub Release would say.
 	ReleaseNotes(ctx context.Context, name string, tag string) (ReleaseNotes, error)
-	// Publish publishes a GitHub Release for an existing tag now, without
-	// deploying it (a backfill): its notes from notesFrom's CHANGELOG.md if
-	// given, dated date (YYYY-MM-DD) if given. A failed attempt stays queued.
+	// Publish backfills tag's Release, notes from notesFrom and dated date if given; a failure stays queued.
 	Publish(ctx context.Context, name string, tag string, date string, notesFrom string) (Release, error)
 }
 

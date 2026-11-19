@@ -1,7 +1,4 @@
--- Lighthouse database: show what exists. Read-only; changes nothing.
---
--- Run as a superuser:
---   psql -U postgres -d postgres -f scripts/db/check.sql
+-- Shows Lighthouse's roles, database and access without changing anything; run by a superuser.
 
 \echo '== Roles (want: owner NOLOGIN; migrator, app, reader LOGIN; migrator member of owner with role=lighthouse_owner)'
 SELECT r.rolname AS role,

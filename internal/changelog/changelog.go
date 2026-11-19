@@ -1,5 +1,4 @@
-// Package changelog reads a version's section of a CHANGELOG.md and turns it
-// into GitHub Release notes.
+// Package changelog turns a version's section of a CHANGELOG.md into GitHub Release notes.
 package changelog
 
 import (
@@ -25,8 +24,7 @@ var (
 	date    = regexp.MustCompile(`\b(\d{4}-\d{2}-\d{2})\b`)
 )
 
-// Find returns the section for version (v1.2.3 or 1.2.3), with headings
-// written as "## v1.2.3 (2026-10-20)", "## v1.2.3" or "## [1.2.3] — 2026-10-20".
+// Find returns version's section, under a heading such as "## v1.2.3 (2026-10-20)" or "## [1.2.3]".
 func Find(text []byte, version string) (Section, bool) {
 	want := strings.TrimPrefix(version, "v")
 	lines := strings.Split(strings.ReplaceAll(string(text), "\r\n", "\n"), "\n")
@@ -54,15 +52,12 @@ func Find(text []byte, version string) (Section, bool) {
 	return Section{}, false
 }
 
-// Notes is a GitHub Release's text for version, with the dated heading the
-// website reads: the CHANGELOG's date, else published. Warnings say what was
-// missing.
+// Notes is version's Release text, dated as the CHANGELOG says or else published, with warnings.
 func Notes(text []byte, version string, published time.Time) (string, []string) {
 	return notes(text, version, published, false)
 }
 
-// NotesDated is Notes with date in the heading, whatever the CHANGELOG says
-// (a backfill keeping a version's original date).
+// NotesDated is Notes dated date whatever the CHANGELOG says, for a backfill.
 func NotesDated(text []byte, version string, date time.Time) (string, []string) {
 	return notes(text, version, date, true)
 }

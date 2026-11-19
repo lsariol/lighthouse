@@ -36,8 +36,7 @@ type NewRelease struct {
 	Latest     bool // GitHub's "latest" Release
 }
 
-// TagCommit returns the commit a tag points at (through an annotated tag);
-// found is false if there's no such tag.
+// TagCommit returns the commit a tag points at; found is false if there's no such tag.
 func (c Client) TagCommit(ctx context.Context, repo Repo, tag string, token string) (string, bool, error) {
 	op := fmt.Sprintf("find the commit of tag %s in %s", tag, repo)
 	var ref struct {
@@ -68,8 +67,7 @@ func (c Client) TagCommit(ctx context.Context, repo Repo, tag string, token stri
 	return ref.Object.SHA, true, nil
 }
 
-// ReleaseByTag returns the published Release for tag; found is false if
-// there's none.
+// ReleaseByTag returns the published Release for tag; found is false if there's none.
 func (c Client) ReleaseByTag(ctx context.Context, repo Repo, tag string, token string) (Release, bool, error) {
 	var r Release
 	err := c.call(ctx, http.MethodGet, fmt.Sprintf("find the Release of %s in %s", tag, repo),
@@ -98,8 +96,7 @@ func (c Client) Releases(ctx context.Context, repo Repo, token string) ([]Releas
 	return all, nil
 }
 
-// CreateRelease publishes a Release for an existing tag. If one already
-// exists (another attempt got there first), it returns that one.
+// CreateRelease publishes a Release for an existing tag, or returns the one that already exists.
 func (c Client) CreateRelease(ctx context.Context, repo Repo, r NewRelease, token string) (Release, error) {
 	latest := "false"
 	if r.Latest {

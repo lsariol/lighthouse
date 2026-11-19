@@ -12,9 +12,7 @@ import (
 	"time"
 )
 
-// These tests run the real docker compose. Inspect and Variables need only
-// the CLI; Build, Up and Down need a Docker daemon. Without them, the tests
-// are skipped.
+// These tests run the real docker compose, and skip without it or a Docker daemon.
 
 func needCompose(t *testing.T) {
 	t.Helper()

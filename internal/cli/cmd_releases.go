@@ -14,8 +14,7 @@ import (
 // waitingGrace is how long a tag may wait for main before status mentions it.
 const waitingGrace = 10 * time.Minute
 
-// unpublishedAfter is how many passing failures in a row to publish a
-// Release status mentions.
+// unpublishedAfter is how many failed attempts in a row to publish make status mention it.
 const unpublishedAfter = 3
 
 // publish publishes a GitHub Release for an existing tag, without deploying it.
@@ -95,8 +94,7 @@ func (c *CLI) releaseNotes(ctx context.Context, name string, tag string) error {
 	return nil
 }
 
-// published is a publish-only project's newest published version,
-// "v1.2.0, published", or "-".
+// published is a publish-only project's newest published version, "v1.2.0, published", or "-".
 func published(p control.Project) string {
 	if p.Version == "" {
 		return "-"
@@ -104,8 +102,7 @@ func published(p control.Project) string {
 	return p.Version + ", published"
 }
 
-// releaseNote is what the releases table says about r: its Release, the
-// last attempt's error and the next one, or its note.
+// releaseNote is the releases table's note on r: its Release, its last error and next attempt, or its note.
 func releaseNote(r control.Release) string {
 	var parts []string
 	if r.URL != "" {
@@ -150,9 +147,7 @@ func releaseWarnings(p control.Project) []string {
 	return lines
 }
 
-// releaseProblems are status's "Needs attention" items about a project's
-// releases: tags waiting for main longer than waitingGrace, moved tags, and
-// no release yet.
+// releaseProblems are status's items on p's releases: tags waiting too long, moved tags, no release.
 func releaseProblems(p control.Project, now time.Time) []string {
 	var problems []string
 	for _, r := range p.OpenReleases {

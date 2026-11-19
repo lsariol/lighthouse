@@ -29,8 +29,7 @@ type Client struct {
 	api *client.Client
 }
 
-// New connects to the Docker daemon named by the environment (DOCKER_HOST,
-// else the default socket).
+// New connects to the Docker daemon named by DOCKER_HOST, else the default socket.
 func New() (*Client, error) {
 	api, err := client.New(client.FromEnv)
 	if err != nil {
@@ -57,8 +56,7 @@ type Container struct {
 	ImageID  string
 }
 
-// ProjectContainers returns every container of the compose project, running
-// or not, sorted by service.
+// ProjectContainers returns every container of the compose project, sorted by service.
 func (c *Client) ProjectContainers(ctx context.Context, project string) ([]Container, error) {
 	result, err := c.api.ContainerList(ctx, client.ContainerListOptions{
 		All:     true,
@@ -183,8 +181,7 @@ func healthFromStatus(status string) string {
 
 var exitedStatus = regexp.MustCompile(`^Exited \((-?\d+)\)`)
 
-// exitCodeFromStatus reads the exit code from Docker's status text, e.g.
-// "Exited (1) 2 hours ago".
+// exitCodeFromStatus reads the exit code from Docker's status, such as "Exited (1) 2 hours ago".
 func exitCodeFromStatus(status string) int {
 	if m := exitedStatus.FindStringSubmatch(status); m != nil {
 		code, _ := strconv.Atoi(m[1])
@@ -247,8 +244,7 @@ func (c *Client) Restart(ctx context.Context, id string) error {
 	return nil
 }
 
-// Logs returns the last tail lines of a container's output, stdout and
-// stderr combined.
+// Logs returns the last tail lines of a container's stdout and stderr.
 func (c *Client) Logs(ctx context.Context, id string, tail int) (string, error) {
 	rc, err := c.api.ContainerLogs(ctx, id, client.ContainerLogsOptions{
 		ShowStdout: true,
@@ -287,8 +283,7 @@ func (c *Client) Tag(ctx context.Context, source string, target string) error {
 	return nil
 }
 
-// Tags returns the tags of repository (e.g. "website-web") that start with
-// prefix, e.g. "lh-".
+// Tags returns repository's tags that start with prefix, such as "lh-".
 func (c *Client) Tags(ctx context.Context, repository string, prefix string) ([]string, error) {
 	result, err := c.api.ImageList(ctx, client.ImageListOptions{
 		Filters: client.Filters{}.Add("reference", repository+":"+prefix+"*"),
@@ -316,8 +311,7 @@ func (c *Client) Untag(ctx context.Context, ref string) error {
 	return nil
 }
 
-// PruneDangling removes images that have no name and no container: the ones
-// each rebuild leaves behind.
+// PruneDangling removes the unnamed, unused images each rebuild leaves behind.
 func (c *Client) PruneDangling(ctx context.Context) error {
 	_, err := c.api.ImagePrune(ctx, client.ImagePruneOptions{
 		Filters: client.Filters{}.Add("dangling", "true"),

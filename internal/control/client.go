@@ -89,8 +89,7 @@ func (c *Client) call(ctx context.Context, method string, path string, body any,
 	return nil
 }
 
-// unwrapDial strips the URL wrapping from a dial error, leaving the reason
-// ("connect: no such file or directory").
+// unwrapDial strips the URL from a dial error, leaving the reason.
 func unwrapDial(err error) error {
 	var urlErr *url.Error
 	if errors.As(err, &urlErr) {

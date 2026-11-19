@@ -23,8 +23,7 @@ import (
 	"github.com/lsariol/lighthouse/internal/settings"
 )
 
-// Containers finds and controls a compose project's containers.
-// *docker.Client implements it.
+// Containers finds and controls a compose project's containers, as *docker.Client does.
 type Containers interface {
 	ProjectContainers(ctx context.Context, project string) ([]docker.Container, error)
 	Start(ctx context.Context, id string) error
@@ -38,8 +37,7 @@ type Compose interface {
 	Down(ctx context.Context, dir string, project string, out io.Writer) error
 }
 
-// Health reports on the database for `status`. *database.Database
-// implements it.
+// Health reports on the database for `status`, as *database.Database does.
 type Health interface {
 	Ping(ctx context.Context) error
 	SchemaVersion(ctx context.Context) (have int64, want int64, err error)
@@ -84,8 +82,7 @@ func (d *Daemon) SetPhase(phase string) {
 	d.phase = phase
 }
 
-// Ready hands the daemon its store and orchestrator, once startup has
-// connected everything, and marks it running.
+// Ready hands the daemon its store and orchestrator once startup is done, and marks it running.
 func (d *Daemon) Ready(store projects.Store, o *orchestrator.Orchestrator, health Health) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -93,8 +90,7 @@ func (d *Daemon) Ready(store projects.Store, o *orchestrator.Orchestrator, healt
 	d.phase = PhaseRunning
 }
 
-// parts returns the store and orchestrator, or an unavailable error while
-// Lighthouse is still starting.
+// parts returns the store and orchestrator, or an unavailable error while starting.
 func (d *Daemon) parts() (projects.Store, *orchestrator.Orchestrator, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
@@ -236,8 +232,7 @@ func (d *Daemon) Projects(ctx context.Context) ([]control.Project, error) {
 	return out, nil
 }
 
-// newestPublished makes a publish-only project's version its newest
-// published stable release, and its last deploy when that was published.
+// newestPublished gives a publish-only project its newest published stable release as its version.
 func newestPublished(cp *control.Project, rows []projects.Release) {
 	var best release.Version
 	for _, r := range rows {
@@ -375,8 +370,7 @@ func (d *Daemon) Add(ctx context.Context, name string, url string, publishOnly b
 	return toProject(p), nil
 }
 
-// projectName is the name a repository's project gets by default: its name,
-// lowercased, with anything but letters, digits, - and _ turned into -.
+// projectName is a repository's default project name: lowercased, other characters as -.
 func projectName(repo string) string {
 	b := []byte(strings.ToLower(repo))
 	for i, c := range b {
@@ -502,8 +496,7 @@ func (d *Daemon) Retry(ctx context.Context, name string) error {
 	return deployError(name, o.Retry(ctx, name))
 }
 
-// Check runs ref, or what a deploy would take, through the deploy's checks
-// without deploying it.
+// Check runs ref, or what a deploy would take, through the deploy's checks without deploying it.
 func (d *Daemon) Check(ctx context.Context, name string, ref string) (control.Deployment, error) {
 	_, o, err := d.parts()
 	if err != nil {
@@ -536,8 +529,7 @@ func (d *Daemon) Check(ctx context.Context, name string, ref string) (control.De
 	return out, nil
 }
 
-// publishOnlyError refuses a command that deploys or runs containers for a
-// publish-only project.
+// publishOnlyError refuses a deploy or container command for a publish-only project.
 func publishOnlyError(name string) error {
 	return control.Errorf(control.KindInvalid, "%q is publish-only: Lighthouse publishes its GitHub Releases but never deploys it or runs containers for it. \"releases %s\" shows its tags.", name, name)
 }
@@ -652,8 +644,7 @@ func (d *Daemon) Restart(ctx context.Context, target string) error {
 	return d.stopped(ctx, target, false, d.containerAction(ctx, target, "restart", d.containers.Restart))
 }
 
-// stopped records whether a whole project was stopped on purpose, after the
-// action (err) worked.
+// stopped records whether a whole project was stopped on purpose, once the action worked.
 func (d *Daemon) stopped(ctx context.Context, target string, stopped bool, err error) error {
 	if err != nil || strings.Contains(target, ":") {
 		return err
@@ -672,8 +663,7 @@ func (d *Daemon) stopped(ctx context.Context, target string, stopped bool, err e
 	return store.SetStopped(ctx, p.Name, stopped)
 }
 
-// targets resolves "<project>" (every container) or "<project>:<service>"
-// (that service's) to containers.
+// targets resolves "<project>" or "<project>:<service>" to its containers.
 func (d *Daemon) targets(ctx context.Context, target string) (projects.Project, []docker.Container, error) {
 	name, service, hasService := strings.Cut(target, ":")
 	p, err := d.find(ctx, name)

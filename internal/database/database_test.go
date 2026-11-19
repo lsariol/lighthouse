@@ -16,9 +16,7 @@ import (
 	"github.com/lsariol/lighthouse/internal/projects/projectstest"
 )
 
-// The integration tests run against a real, disposable Postgres set up with
-// scripts/db/setup.sql (scripts/test-db.sh does it). Without these
-// variables they're skipped.
+// The integration tests need a disposable Postgres from scripts/test-db.sh, and skip without one.
 var (
 	migratorURL = os.Getenv("LIGHTHOUSE_TEST_DATABASE_MIGRATOR_URL")
 	appURL      = os.Getenv("LIGHTHOUSE_TEST_DATABASE_URL")
@@ -73,8 +71,7 @@ func TestMigrationsAreRepeatable(t *testing.T) {
 	}
 }
 
-// The grants in 00002: the app may change projects but only add history;
-// it can't change the schema; everything is owned by lighthouse_owner.
+// The grants in 00002: the app changes projects and only adds history; lighthouse_owner owns everything.
 func TestGrants(t *testing.T) {
 	db := open(t)
 	ctx := context.Background()

@@ -1,5 +1,4 @@
-// Package policy decides whether a compose file may be deployed: the deploy
-// rules, and the exceptions in policy.json.
+// Package policy decides whether a compose file may be deployed: the rules and policy.json's exceptions.
 package policy
 
 import (
@@ -13,8 +12,7 @@ import (
 	"strings"
 )
 
-// SharedNetwork is the network projects share, to reach Cove, sparkdb and
-// each other. Every other network a project joins must be its own.
+// SharedNetwork is the network projects share; every other network a project joins must be its own.
 const SharedNetwork = "spark"
 
 // SharedPrefix starts the Cove keys any project may use.
@@ -25,9 +23,7 @@ type Policy struct {
 	Exceptions []Exception `json:"exceptions"`
 }
 
-// Exception allows one service of a compose project what the rules would
-// refuse. A host mount says how: mount:<path>:ro allows it read-only only,
-// mount:<path>:rw either way.
+// Exception allows one service what the rules refuse; mount:<path>:ro is read-only only, :rw either way.
 type Exception struct {
 	Project string   `json:"project"`
 	Service string   `json:"service"`
@@ -49,8 +45,7 @@ func MountID(path string, readOnly bool) string {
 	return "mount:" + path + ":" + ReadWrite
 }
 
-// splitMode splits a host mount's ID into the rest and its mode; mode is ""
-// for any other ID, or a mount without one.
+// splitMode splits a host mount's ID into the rest and its mode, "" if it has none.
 func splitMode(id string) (string, string) {
 	if !strings.HasPrefix(id, "mount:") {
 		return id, ""
@@ -105,9 +100,7 @@ func Parse(data []byte) (Policy, error) {
 	return p, nil
 }
 
-// allowed returns the reason project's service may have the finding id, if
-// it may. readOnlyOnly reports a read-write mount whose exception allows it
-// read-only only.
+// allowed returns why service may have finding id, and whether a read-write mount is allowed read-only only.
 func (p Policy) allowed(project string, service string, id string) (reason string, ok bool, readOnlyOnly bool) {
 	rest, mode := splitMode(id)
 	for _, e := range p.Exceptions {
@@ -129,8 +122,7 @@ func (p Policy) allowed(project string, service string, id string) (reason strin
 	return "", false, readOnlyOnly
 }
 
-// Apply marks the findings project has an exception for, and returns the
-// ones that stop the deploy: everything that's neither a warning nor allowed.
+// Apply marks the allowed findings and returns those that stop the deploy.
 func (p Policy) Apply(project string, findings []Finding) []Finding {
 	var refused []Finding
 	for i := range findings {
@@ -151,8 +143,7 @@ func (p Policy) Apply(project string, findings []Finding) []Finding {
 	return refused
 }
 
-// UnknownServices warns about exceptions for project that name a service its
-// compose file doesn't have, so a misspelled one doesn't quietly do nothing.
+// UnknownServices warns about exceptions naming a service the compose file doesn't have.
 func (p Policy) UnknownServices(project string, services []string) []Finding {
 	var warnings []Finding
 	for _, e := range p.Exceptions {
@@ -164,8 +155,7 @@ func (p Policy) UnknownServices(project string, services []string) []Finding {
 	return warnings
 }
 
-// Finding is one thing a compose file asks for that the rules refuse (or,
-// for a warning, advise against).
+// Finding is one thing a compose file asks for that the rules refuse or advise against.
 type Finding struct {
 	ID      string
 	Service string

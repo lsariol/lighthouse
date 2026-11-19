@@ -14,11 +14,7 @@ import (
 	"github.com/lsariol/lighthouse/internal/projects"
 )
 
-// TestRealSelfUpdate runs a whole self-update against real Docker: a project
-// built FROM the Lighthouse image hands off to the real update helper, which
-// swaps it; then a version that never becomes healthy is handed off and must
-// be rolled back. Each version reads a secret under its own key, so the
-// rollback must give the previous version its own.
+// TestRealSelfUpdate runs a self-update and a rollback with real Docker, each version with its own secret.
 func TestRealSelfUpdate(t *testing.T) {
 	base := os.Getenv("LIGHTHOUSE_E2E_SELF_UPDATE")
 	if base == "" {

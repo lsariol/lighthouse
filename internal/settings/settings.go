@@ -194,8 +194,7 @@ func unquote(s string) string {
 	return s
 }
 
-// stripComment removes a # comment (one at the start of the line, or after a
-// space), outside quotes, and trailing spaces.
+// stripComment removes a # comment outside quotes, and trailing spaces.
 func stripComment(line string) string {
 	quote := byte(0)
 	for i := 0; i < len(line); i++ {

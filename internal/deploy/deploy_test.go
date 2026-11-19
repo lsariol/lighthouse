@@ -86,8 +86,7 @@ func (f *fakeSecrets) GetSecretsContext(ctx context.Context, keys ...string) (ma
 	return out, nil
 }
 
-// fakeCompose answers from its fields; up runs after a successful Up, to
-// let the test set the containers' state.
+// fakeCompose answers from its fields; up runs after a successful Up.
 type fakeCompose struct {
 	name     string
 	services []compose.Service
@@ -277,8 +276,7 @@ type env struct {
 	log     *bytes.Buffer
 }
 
-// newEnv is a project "website" with a built web service and a database,
-// one secret and one plain setting; after Up, both run healthy.
+// newEnv is a project "website" with a web service and a database, one secret and one setting.
 func newEnv(t *testing.T) *env {
 	t.Helper()
 	e := &env{
@@ -450,8 +448,7 @@ func TestFailuresBeforeTheSwap(t *testing.T) {
 	}
 }
 
-// deployed runs a first successful deploy at sha1 and returns the project as
-// the store would then have it.
+// deployed runs a first successful deploy at sha1 and returns the project as stored.
 func deployed(t *testing.T, e *env) projects.Project {
 	t.Helper()
 	if res := e.deploy(t, landing, sha1); res.Status != projects.StatusSucceeded {

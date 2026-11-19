@@ -77,8 +77,7 @@ func questionText(label, question string) string {
 	return colorize(yellow, "?") + " " + label + " " + colorize(yellow, question)
 }
 
-// promptFor returns the prompt for an environment such as "dev" or "prod":
-// "lighthouse (dev)> ".
+// promptFor returns the prompt for an environment, such as "lighthouse (dev)> ".
 func promptFor(env string) string {
 	if label := envLabel(env); label != "" {
 		return "lighthouse " + label + "> "
@@ -137,8 +136,7 @@ func shortSHA(sha string) string {
 	}
 }
 
-// deployed is what's deployed, for a table: "v1.2.0 (abc1234)" for a
-// release, "abc1234" for a commit, or "-".
+// deployed is "v1.2.0 (abc1234)" for a release, "abc1234" for a commit, or "-".
 func deployed(version string, sha string) string {
 	if version != "" {
 		return version + " (" + shortSHA(sha) + ")"
