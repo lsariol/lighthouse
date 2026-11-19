@@ -115,15 +115,15 @@ func TestEachRuleRefuses(t *testing.T) {
 		{map[string]any{"security_opt": []string{"label:disable"}}, nil, "security_opt:label:disable"},
 		{map[string]any{"volumes_from": []string{"container:cove"}}, nil, "volumes_from:container:cove"},
 		{map[string]any{"volumes": []any{map[string]any{"type": "bind", "source": "/var/run/docker.sock", "target": "/var/run/docker.sock"}}}, nil,
-			"mount:" + filepath.ToSlash(filepath.Clean("/var/run/docker.sock"))},
-		{map[string]any{"volumes": []any{map[string]any{"type": "bind", "source": "/", "target": "/host", "read_only": true}}}, nil, "mount:" + filepath.ToSlash(filepath.Clean("/"))},
+			"mount:" + filepath.ToSlash(filepath.Clean("/var/run/docker.sock")) + ":rw"},
+		{map[string]any{"volumes": []any{map[string]any{"type": "bind", "source": "/", "target": "/host", "read_only": true}}}, nil, "mount:" + filepath.ToSlash(filepath.Clean("/")) + ":ro"},
 		{map[string]any{"volumes": []any{map[string]any{"type": "bind", "source": filepath.Join(s.storage, "cove", ".env"), "target": "/x"}}}, nil,
-			"mount:" + filepath.ToSlash(filepath.Join(s.storage, "cove", ".env"))},
+			"mount:" + filepath.ToSlash(filepath.Join(s.storage, "cove", ".env")) + ":rw"},
 		{map[string]any{"volumes": []any{map[string]any{"type": "bind", "source": filepath.Join(s.storage, "site-other"), "target": "/x"}}}, nil,
-			"mount:" + filepath.ToSlash(filepath.Join(s.storage, "site-other"))},
+			"mount:" + filepath.ToSlash(filepath.Join(s.storage, "site-other")) + ":rw"},
 		{map[string]any{"volumes": []any{map[string]any{"type": "bind", "source": filepath.Join(s.dir, "..", "..", "cove"), "target": "/x"}}}, nil,
-			"mount:" + filepath.ToSlash(filepath.Clean(filepath.Join(s.dir, "..", "..", "cove")))},
-		{map[string]any{"volumes": []any{map[string]any{"type": "bind", "source": "/etc/localtime", "target": "/etc/localtime"}}}, nil, "mount:" + filepath.ToSlash(filepath.Clean("/etc/localtime"))},
+			"mount:" + filepath.ToSlash(filepath.Clean(filepath.Join(s.dir, "..", "..", "cove"))) + ":rw"},
+		{map[string]any{"volumes": []any{map[string]any{"type": "bind", "source": "/etc/localtime", "target": "/etc/localtime"}}}, nil, "mount:" + filepath.ToSlash(filepath.Clean("/etc/localtime")) + ":rw"},
 		{map[string]any{"env_file": []any{map[string]any{"path": "/app/vault/cove/token"}}}, nil, "file:" + filepath.ToSlash(filepath.Clean("/app/vault/cove/token"))},
 		{map[string]any{"build": map[string]any{"context": "/"}}, nil, "file:" + filepath.ToSlash(filepath.Clean("/"))},
 		{map[string]any{"build": map[string]any{"context": s.dir, "dockerfile": "/etc/shadow"}}, nil, "file:" + filepath.ToSlash(filepath.Clean("/etc/shadow"))},
@@ -133,7 +133,7 @@ func TestEachRuleRefuses(t *testing.T) {
 		{map[string]any{"build": map[string]any{"context": s.dir, "entitlements": []string{"security.insecure"}}}, nil, "build:entitlement:security.insecure"},
 		{nil, map[string]any{"volumes": map[string]any{"data": map[string]any{"name": "cove_data", "external": true}}}, "volume:cove_data"},
 		{nil, map[string]any{"volumes": map[string]any{"etc": map[string]any{"name": "site_etc", "driver_opts": map[string]string{"type": "none", "o": "bind", "device": "/etc"}}}},
-			"mount:" + filepath.ToSlash(filepath.Clean("/etc"))},
+			"mount:" + filepath.ToSlash(filepath.Clean("/etc")) + ":rw"},
 		{nil, map[string]any{"networks": map[string]any{"spark": map[string]any{"name": "spark", "external": true}, "w": map[string]any{"name": "website_default", "external": true}}},
 			"network:website_default"},
 		{nil, map[string]any{"secrets": map[string]any{"s": map[string]any{"file": "/etc/shadow"}}}, "file:" + filepath.ToSlash(filepath.Clean("/etc/shadow"))},
@@ -221,12 +221,12 @@ func TestRealSymlink(t *testing.T) {
 
 func TestExceptions(t *testing.T) {
 	p, err := Parse([]byte(`{"exceptions": [
-		{"project": "sonar", "allow": ["mount:/var/run/docker.sock"], "reason": "reads container stats"},
-		{"project": "media", "allow": ["mount:/srv/media/*"], "reason": "the library"}]}`))
+		{"project": "sonar", "service": "proxy", "allow": ["mount:/var/run/docker.sock:rw"], "reason": "reads container stats"},
+		{"project": "media", "service": "web", "allow": ["mount:/srv/media/*:rw"], "reason": "the library"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	fs := []Finding{{ID: "mount:/var/run/docker.sock"}, {ID: "privileged"}}
+	fs := []Finding{{ID: "mount:/var/run/docker.sock:rw", Service: "proxy"}, {ID: "privileged", Service: "proxy"}}
 	refused := p.Apply("sonar", fs)
 	if len(refused) != 1 || refused[0].ID != "privileged" {
 		t.Errorf("refused %v, want only privileged", refused)
@@ -234,10 +234,10 @@ func TestExceptions(t *testing.T) {
 	if fs[0].Allowed != "reads container stats" || !strings.Contains(fs[0].String(), "allowed by policy.json") {
 		t.Errorf("allowed finding: %+v / %s", fs[0], fs[0].String())
 	}
-	if refused := p.Apply("other", []Finding{{ID: "mount:/var/run/docker.sock"}}); len(refused) != 1 {
+	if refused := p.Apply("other", []Finding{{ID: "mount:/var/run/docker.sock:rw", Service: "proxy"}}); len(refused) != 1 {
 		t.Error("an exception applied to another project")
 	}
-	if refused := p.Apply("media", []Finding{{ID: "mount:/srv/media/films"}, {ID: "mount:/srv/mediax"}}); len(refused) != 1 || refused[0].ID != "mount:/srv/mediax" {
+	if refused := p.Apply("media", []Finding{{ID: "mount:/srv/media/films:ro", Service: "web"}, {ID: "mount:/srv/mediax:rw", Service: "web"}}); len(refused) != 1 || refused[0].ID != "mount:/srv/mediax:rw" {
 		t.Errorf("wildcard: refused %v", refused)
 	}
 }
@@ -245,22 +245,23 @@ func TestExceptions(t *testing.T) {
 // An exception with a service allows only that service's findings.
 func TestServiceExceptions(t *testing.T) {
 	p, err := Parse([]byte(`{"exceptions": [
-		{"project": "sonar", "service": "agent", "allow": ["mount:/proc", "mount:/var/run/docker.sock"], "reason": "the agent samples host metrics"},
-		{"project": "sonar", "allow": ["cap_add:NET_RAW"], "reason": "every service pings"}]}`))
+		{"project": "sonar", "service": "agent", "allow": ["mount:/proc:ro", "mount:/var/run/docker.sock:rw"], "reason": "the agent samples host metrics"},
+		{"project": "sonar", "service": "api", "allow": ["cap_add:NET_RAW"], "reason": "the api pings"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	fs := []Finding{
-		{ID: "mount:/proc", Service: "agent"},
-		{ID: "mount:/var/run/docker.sock", Service: "api"},
+		{ID: "mount:/proc:ro", Service: "agent"},
+		{ID: "mount:/var/run/docker.sock:rw", Service: "api"},
 		{ID: "cap_add:NET_RAW", Service: "api"},
+		{ID: "cap_add:NET_RAW", Service: "agent"},
 		{ID: "network:other_default"},
 	}
 	refused := p.Apply("sonar", fs)
-	if got := strings.Join(ids(refused), ","); got != "mount:/var/run/docker.sock,network:other_default" {
-		t.Errorf("refused %s; want the api's socket and the project-wide network", got)
+	if got := strings.Join(ids(refused), ","); got != "cap_add:NET_RAW,mount:/var/run/docker.sock:rw,network:other_default" {
+		t.Errorf("refused %s; want the api's socket, the agent's capability and the project-wide network", got)
 	}
-	if fs[0].Allowed != "the agent samples host metrics" || fs[2].Allowed != "every service pings" {
+	if fs[0].Allowed != "the agent samples host metrics" || fs[2].Allowed != "the api pings" {
 		t.Errorf("allowed: %+v", fs)
 	}
 
@@ -273,6 +274,41 @@ func TestServiceExceptions(t *testing.T) {
 	}
 	if w := p.UnknownServices("other", nil); len(w) != 0 {
 		t.Errorf("warnings for another project: %v", w)
+	}
+}
+
+// A read-only exception allows only a read-only mount, and says so when the
+// mount writes; a read-write one allows either.
+func TestMountModes(t *testing.T) {
+	p, err := Parse([]byte(`{"exceptions": [
+		{"project": "sonar", "service": "agent", "allow": ["mount:/proc/1/net/dev:ro", "mount:/srv/data:rw"], "reason": "r"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fs := []Finding{
+		{ID: "mount:/proc/1/net/dev:ro", Service: "agent"},
+		{ID: "mount:/srv/data:ro", Service: "agent"},
+		{ID: "mount:/srv/data:rw", Service: "agent"},
+		{ID: "mount:/proc/1/net/dev:rw", Service: "agent", Problem: "mounts /proc/1/net/dev from the host (read-write)"},
+	}
+	refused := p.Apply("sonar", fs)
+	if len(refused) != 1 || refused[0].ID != "mount:/proc/1/net/dev:rw" || !strings.Contains(refused[0].Problem, "allows it read-only only") {
+		t.Errorf("refused %+v; want only the read-write /proc/1/net/dev, with a hint", refused)
+	}
+
+	s := newSetup(t)
+	for _, c := range []struct {
+		volume map[string]any
+		want   string
+	}{
+		{map[string]any{"type": "bind", "source": "/proc/1/net/dev", "target": "/host/net/dev", "read_only": true}, "/proc/1/net/dev:ro"},
+		{map[string]any{"type": "bind", "source": "/proc/1/net/dev", "target": "/host/net/dev"}, "/proc/1/net/dev:rw"},
+	} {
+		got := ids(s.check(t, cfg(t, map[string]any{"volumes": []any{c.volume}}, nil)))
+		want := "mount:" + filepath.ToSlash(filepath.Clean("/proc/1/net/dev")) + c.want[len("/proc/1/net/dev"):]
+		if !slices.Equal(got, []string{want}) {
+			t.Errorf("findings %v, want [%s]", got, want)
+		}
 	}
 }
 
@@ -297,11 +333,14 @@ func TestURLLabel(t *testing.T) {
 func TestParseRefusesSloppyPolicies(t *testing.T) {
 	for _, bad := range []string{
 		`{"exceptions": [{"project": "x", "service": "has space", "allow": ["privileged"], "reason": "r"}]}`,
-		`{"exceptions": [{"project": "x", "allow": ["privileged"]}]}`,
-		`{"exceptions": [{"project": "x", "allow": [], "reason": "r"}]}`,
-		`{"exceptions": [{"project": "x", "allow": ["*"], "reason": "r"}]}`,
-		`{"exceptions": [{"project": "Bad Name", "allow": ["privileged"], "reason": "r"}]}`,
-		`{"exceptions": [{"project": "x", "alow": ["privileged"], "reason": "r"}]}`,
+		`{"exceptions": [{"project": "x", "allow": ["privileged"], "reason": "r"}]}`,
+		`{"exceptions": [{"project": "x", "service": "web", "allow": ["privileged"]}]}`,
+		`{"exceptions": [{"project": "x", "service": "web", "allow": [], "reason": "r"}]}`,
+		`{"exceptions": [{"project": "x", "service": "web", "allow": ["*"], "reason": "r"}]}`,
+		`{"exceptions": [{"project": "Bad Name", "service": "web", "allow": ["privileged"], "reason": "r"}]}`,
+		`{"exceptions": [{"project": "x", "service": "web", "alow": ["privileged"], "reason": "r"}]}`,
+		`{"exceptions": [{"project": "x", "service": "web", "allow": ["mount:/srv/media"], "reason": "r"}]}`,
+		`{"exceptions": [{"project": "x", "service": "web", "allow": ["mount:/var/run/docker.sock:ro"], "reason": "r"}]}`,
 		`{"exception": []}`,
 	} {
 		if _, err := Parse([]byte(bad)); err == nil {

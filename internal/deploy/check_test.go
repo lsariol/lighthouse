@@ -45,7 +45,7 @@ func TestCheckRefusesBeforeAnythingChanges(t *testing.T) {
 func TestCheckException(t *testing.T) {
 	e := newEnv(t)
 	e.compose.config = privilegedConfig
-	p, err := policy.Parse([]byte(`{"exceptions": [{"project": "website", "allow": ["privileged"], "reason": "needs it"}]}`))
+	p, err := policy.Parse([]byte(`{"exceptions": [{"project": "website", "service": "web", "allow": ["privileged"], "reason": "needs it"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -24,13 +24,42 @@ type Policy struct {
 	Exceptions []Exception `json:"exceptions"`
 }
 
-// Exception allows a compose project, or one of its services, what the rules
-// would refuse.
+// Exception allows one service of a compose project what the rules would
+// refuse. A host mount says how: mount:<path>:ro allows it read-only only,
+// mount:<path>:rw either way.
 type Exception struct {
 	Project string   `json:"project"`
-	Service string   `json:"service,omitempty"` // only this service's findings; "" for the whole project
+	Service string   `json:"service"`
 	Allow   []string `json:"allow"`
 	Reason  string   `json:"reason"`
+}
+
+// The modes a host mount's finding ends with.
+const (
+	ReadOnly  = "ro"
+	ReadWrite = "rw"
+)
+
+// MountID is a host mount's finding: mount:<path>:ro or mount:<path>:rw.
+func MountID(path string, readOnly bool) string {
+	if readOnly {
+		return "mount:" + path + ":" + ReadOnly
+	}
+	return "mount:" + path + ":" + ReadWrite
+}
+
+// splitMode splits a host mount's ID into the rest and its mode; mode is ""
+// for any other ID, or a mount without one.
+func splitMode(id string) (string, string) {
+	if !strings.HasPrefix(id, "mount:") {
+		return id, ""
+	}
+	for _, mode := range []string{ReadOnly, ReadWrite} {
+		if rest, ok := strings.CutSuffix(id, ":"+mode); ok {
+			return rest, mode
+		}
+	}
+	return id, ""
 }
 
 var (
@@ -50,7 +79,9 @@ func Parse(data []byte) (Policy, error) {
 		switch {
 		case !composeName.MatchString(e.Project):
 			return Policy{}, fmt.Errorf("policy.json: exception %d: project %q isn't a compose project name (lowercase letters, digits, - and _)", i+1, e.Project)
-		case e.Service != "" && !serviceName.MatchString(e.Service):
+		case e.Service == "":
+			return Policy{}, fmt.Errorf("policy.json: exception %d (%s): give the service it's for; an exception covers one service, so a service added later gets nothing by accident", i+1, e.Project)
+		case !serviceName.MatchString(e.Service):
 			return Policy{}, fmt.Errorf("policy.json: exception %d (%s): service %q isn't a compose service name (letters, digits, -, _ and .)", i+1, e.Project, e.Service)
 		case len(e.Allow) == 0:
 			return Policy{}, fmt.Errorf("policy.json: exception %d (%s): allow is empty", i+1, e.Project)
@@ -61,25 +92,40 @@ func Parse(data []byte) (Policy, error) {
 			if id == "" || id == "*" {
 				return Policy{}, fmt.Errorf("policy.json: exception %d (%s): %q allows too much; name the finding IDs", i+1, e.Project, id)
 			}
+			rest, mode := splitMode(id)
+			switch {
+			case strings.HasPrefix(id, "mount:") && mode == "":
+				return Policy{}, fmt.Errorf("policy.json: exception %d (%s): %q needs :ro or :rw at the end, to say whether the mount may write", i+1, e.Project, id)
+			case mode == ReadOnly && strings.HasSuffix(rest, ".sock"):
+				return Policy{}, fmt.Errorf("policy.json: exception %d (%s): %q: a socket mounted read-only still takes every request sent to it, so :ro protects nothing; allow it as :rw", i+1, e.Project, id)
+			}
 		}
 	}
 	return p, nil
 }
 
 // allowed returns the reason project's service may have the finding id, if
-// it may.
-func (p Policy) allowed(project string, service string, id string) (string, bool) {
+// it may. readOnlyOnly reports a read-write mount whose exception allows it
+// read-only only.
+func (p Policy) allowed(project string, service string, id string) (reason string, ok bool, readOnlyOnly bool) {
+	rest, mode := splitMode(id)
 	for _, e := range p.Exceptions {
-		if e.Project != project || e.Service != "" && e.Service != service {
+		if e.Project != project || e.Service != service {
 			continue
 		}
 		for _, a := range e.Allow {
-			if a == id || (strings.HasSuffix(a, "*") && strings.HasPrefix(id, strings.TrimSuffix(a, "*"))) {
-				return e.Reason, true
+			aRest, aMode := splitMode(a)
+			if aRest != rest && !(strings.HasSuffix(aRest, "*") && strings.HasPrefix(rest, strings.TrimSuffix(aRest, "*"))) {
+				continue
 			}
+			if aMode == ReadOnly && mode != ReadOnly {
+				readOnlyOnly = true
+				continue
+			}
+			return e.Reason, true, false
 		}
 	}
-	return "", false
+	return "", false, readOnlyOnly
 }
 
 // Apply marks the findings project has an exception for, and returns the
@@ -91,9 +137,13 @@ func (p Policy) Apply(project string, findings []Finding) []Finding {
 		if f.Warning {
 			continue
 		}
-		if reason, ok := p.allowed(project, f.Service, f.ID); ok {
+		reason, ok, readOnlyOnly := p.allowed(project, f.Service, f.ID)
+		if ok {
 			f.Allowed = reason
 			continue
+		}
+		if readOnlyOnly {
+			f.Problem += "; policy.json allows it read-only only, so mount it read-only (:ro)"
 		}
 		refused = append(refused, *f)
 	}
@@ -105,7 +155,7 @@ func (p Policy) Apply(project string, findings []Finding) []Finding {
 func (p Policy) UnknownServices(project string, services []string) []Finding {
 	var warnings []Finding
 	for _, e := range p.Exceptions {
-		if e.Project == project && e.Service != "" && !slices.Contains(services, e.Service) {
+		if e.Project == project && !slices.Contains(services, e.Service) {
 			warnings = append(warnings, Finding{Warning: true,
 				Problem: fmt.Sprintf("policy.json has an exception for service %q, which the compose file doesn't have (its services: %s)", e.Service, strings.Join(services, ", "))})
 		}

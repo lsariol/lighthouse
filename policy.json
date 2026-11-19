@@ -2,11 +2,12 @@
   "exceptions": [
     {
       "project": "lighthouse",
+      "service": "lighthouse",
       "allow": [
-        "mount:/var/run/docker.sock",
-        "mount:/srv/server/staging",
-        "mount:/srv/server/storage",
-        "mount:/srv/backups"
+        "mount:/var/run/docker.sock:rw",
+        "mount:/srv/server/staging:rw",
+        "mount:/srv/server/storage:ro",
+        "mount:/srv/backups:rw"
       ],
       "reason": "Lighthouse deploys everything: it drives Docker, keeps the deploy folders and backups, and reads the data folders to check symlinks"
     },
@@ -14,15 +15,25 @@
       "project": "sonar",
       "service": "sonar-proxy",
       "allow": [
-        "mount:/var/run/docker.sock"
+        "mount:/var/run/docker.sock:rw",
+        "mount:/srv/server/storage:ro",
+        "cap_add:DAC_READ_SEARCH"
       ],
-      "reason": "Sonar's Docker gateway: answers the agent's two fixed read requests (container list, stats) with secrets stripped. No other Sonar service has the socket."
+      "reason": "Sonar's gateway to the host, with no network: answers the agent's fixed read requests (container list, stats, Docker's disk use) with secrets stripped, and sizes each project's data folder, which needs to list folders owned by other users. No other Sonar service has the socket, the data folders or the capability."
+    },
+    {
+      "project": "sonar",
+      "service": "sonar-agent",
+      "allow": [
+        "mount:/proc/1/net/dev:ro"
+      ],
+      "reason": "The host's network counters, which a container's own /proc/net doesn't show. Only that one file: the rest of /proc/1/net lists the host's connections, routes and ARP table."
     },
     {
       "project": "blackbox",
       "service": "blackbox-proxy",
       "allow": [
-        "mount:/var/run/docker.sock"
+        "mount:/var/run/docker.sock:rw"
       ],
       "reason": "Blackbox's Docker gateway: lists containers and reads their logs through fixed requests, passing no environment or mounts. No other Blackbox service has the socket."
     }

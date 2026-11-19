@@ -526,7 +526,7 @@ Lighthouse deploys whatever is on `main` with full control of the server's Docke
 | `devices`, `device_cgroup_rules` | `device:/dev/ttyUSB0`, `device_cgroup_rule:<rule>` |
 | A `security_opt` that turns a protection off (`seccomp=unconfined`, `apparmor=unconfined`, `label=disable`; `no-new-privileges` is fine) | `security_opt:seccomp=unconfined` |
 | `volumes_from: container:<x>` | `volumes_from:container:cove` |
-| A host path outside the repository and `/srv/server/storage/<compose project>/`: bind mounts (the Docker socket included), `env_file`, file-based `secrets` and `configs`, build contexts and Dockerfiles, a volume bound to a host folder. `/etc/localtime` and `/etc/timezone` may be mounted read-only | `mount:/var/run/docker.sock`, `file:/etc/shadow` |
+| A host path outside the repository and `/srv/server/storage/<compose project>/`: bind mounts (the Docker socket included), `env_file`, file-based `secrets` and `configs`, build contexts and Dockerfiles, a volume bound to a host folder. `/etc/localtime` and `/etc/timezone` may be mounted read-only. A mount's ID ends in its mode, `:ro` or `:rw` | `mount:/var/run/docker.sock:rw`, `mount:/proc/1/net/dev:ro`, `file:/etc/shadow` |
 | A path inside those folders that is a symlink leading out of them (left by the repository, or by a container in its data folder) | `link:<path>` |
 | A volume or network that isn't the project's own (`<compose project>_…`) or `spark` | `volume:cove_data`, `network:website_default` |
 | A `${KEY}` that isn't `<COMPOSE PROJECT>_*` (capitals, `-` as `_`) or `SHARED_*` | `secret:BOTSUITE_COVE_TOKEN` |
@@ -536,17 +536,19 @@ Lighthouse deploys whatever is on `main` with full control of the server's Docke
 
 A port published on every interface (`"2400:2400"`) is only a warning: anything on the local network can reach it, around Cloudflare.
 
-**Exceptions** live in `policy.json` at the top of Lighthouse's repository, built into the binary: a change is reviewed in git and takes effect when Lighthouse is deployed. Each names the compose project, the IDs it allows (an ID ending in `*` allows every ID starting with what comes before it), and why. With `service` (the service's key in the compose file, not its `container_name`), it allows only that service's findings, so a project's other services still can't have them:
+**Exceptions** live in `policy.json` at the top of Lighthouse's repository, built into the binary: a change is reviewed in git and takes effect when Lighthouse is deployed. Each names the compose project, the **one service** it's for (its key in the compose file, not its `container_name`), the IDs it allows (an ID ending in `*` allows every ID starting with what comes before it), and why. It allows only that service's findings, so the project's other services, including one added later, still can't have them:
 
 ```json
 {
   "exceptions": [
-    {"project": "sonar", "service": "agent", "allow": ["mount:/proc", "mount:/sys"], "reason": "the agent samples host metrics; the API has no host access"}
+    {"project": "sonar", "service": "sonar-agent", "allow": ["mount:/proc/1/net/dev:ro"], "reason": "the host's network counters; nothing else in /proc"}
   ]
 }
 ```
 
-A finding that belongs to the project rather than a service (another project's network or volume) can only be allowed by an exception without `service`. An exception naming a service the compose file doesn't have is a warning at the `check` step, so a misspelling doesn't quietly allow nothing. A finding an exception allows is still shown, marked `allowed by policy.json: <reason>`. A malformed `policy.json` (an unknown field, an exception without a reason, `"*"`) fails Lighthouse's tests and its startup. `lh check <name> [<tag or commit>]` runs what a deploy would take (or that tag or commit) through the rules and its test stage without deploying it; `lh help rules` is the short version of this section.
+**A host mount says how it may be mounted.** `mount:<path>:ro` allows it read-only only: mounted read-write, it's refused, and the finding says the exception wants `:ro`. `mount:<path>:rw` allows it either way. An allowed mount without a mode is refused when `policy.json` loads, and so is `:ro` on a socket (a path ending in `.sock`): a socket mounted read-only still takes every request sent to it, so the exception says `:rw` honestly.
+
+A finding that belongs to the project rather than a service (another project's network or volume) is never allowed. An exception naming a service the compose file doesn't have is a warning at the `check` step, so a misspelling doesn't quietly allow nothing. A finding an exception allows is still shown, marked `allowed by policy.json: <reason>`. A malformed `policy.json` (an unknown field, an exception without a service or a reason, `"*"`, a mount without a mode) fails Lighthouse's tests and its startup. `lh check <name> [<tag or commit>]` runs what a deploy would take (or that tag or commit) through the rules and its test stage without deploying it; `lh help rules` is the short version of this section.
 
 ### 7.2 Lighthouse settings (`x-lighthouse`)
 

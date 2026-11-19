@@ -488,8 +488,9 @@ deploy (the ID in brackets is what an exception names):
     host, or another container's
   security_opt that turns a protection     [security_opt:seccomp=unconfined]
     off
-  host paths outside the repository and    [mount:/var/run/docker.sock]
-    /srv/server/storage/<compose project>/ [file:/etc/shadow] [link:...]
+  host paths outside the repository and    [mount:/var/run/docker.sock:rw]
+    /srv/server/storage/<compose project>/ [mount:/proc/1/net/dev:ro]
+                                           [file:/etc/shadow] [link:...]
   another project's volume or network      [volume:cove_data] [network:x]
   a Cove key that isn't <PROJECT>_* or     [secret:BOTSUITE_COVE_TOKEN]
     SHARED_*
@@ -500,13 +501,16 @@ deploy (the ID in brackets is what an exception names):
 
 A port published on every interface is only a warning.
 
-Allowing something (one project, or one of its services, at a time):
+Allowing something (one service at a time):
 1. Add an exception to policy.json in Lighthouse's repository:
-     {"project": "sonar", "service": "agent", "allow": ["mount:/proc"],
-      "reason": "samples host metrics"}
-   project is the compose project; service (optional) limits it to that
-   service's findings; an ID ending in * allows every ID that starts
-   with what comes before it.
+     {"project": "sonar", "service": "sonar-agent",
+      "allow": ["mount:/proc/1/net/dev:ro"],
+      "reason": "the host's network counters"}
+   project is the compose project and service the one service it's for.
+   A host mount ends in :ro (allowed read-only only) or :rw (either way);
+   a socket is always :rw, since read-only doesn't stop requests to it.
+   An ID ending in * allows every ID that starts with what comes before
+   it. Another project's volume or network is never allowed.
 2. Commit it, and deploy Lighthouse.
 3. "check <name>" shows the finding as allowed; "retry <name>" deploys.`
 

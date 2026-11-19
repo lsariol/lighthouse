@@ -312,11 +312,15 @@ func (c *checker) hostMount(service string, source string, readOnly bool) {
 	case readOnly && readOnlyHostFiles[path]:
 		return
 	}
+	id, how := MountID(path, readOnly), "read-write"
+	if readOnly {
+		how = "read-only"
+	}
 	switch {
 	case strings.HasSuffix(path, "/docker.sock"):
-		c.add(service, "mount:"+path, "mounts the Docker socket, which controls every container on the server (root on the host)")
+		c.add(service, id, "mounts the Docker socket, which controls every container on the server (root on the host)")
 	default:
-		c.add(service, "mount:"+path, "mounts %s from the host; data belongs in %s", path, c.storageHint())
+		c.add(service, id, "mounts %s from the host (%s); data belongs in %s", path, how, c.storageHint())
 	}
 }
 
