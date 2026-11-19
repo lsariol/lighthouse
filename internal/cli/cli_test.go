@@ -604,6 +604,24 @@ func TestPrompt(t *testing.T) {
 	}
 }
 
+func TestConfirmationShowsEnvironment(t *testing.T) {
+	old := useColor
+	useColor = false
+	defer func() { useColor = old }()
+
+	if got, want := questionText(envLabel("prod"), "Stop \"plop\"? (y/N)"), `? (prod) Stop "plop"? (y/N)`; got != want {
+		t.Errorf("confirmation = %q, want %q", got, want)
+	}
+	if got, want := questionText("", "Name?"), "? Name?"; got != want {
+		t.Errorf("question = %q, want %q", got, want)
+	}
+
+	useColor = true
+	if got := questionText(envLabel("prod"), "Stop?"); !strings.Contains(got, red+"(prod)") {
+		t.Errorf("the prod label isn't red: %q", got)
+	}
+}
+
 func TestCompletion(t *testing.T) {
 	c := New(newFake("plop", "plex"), Options{})
 

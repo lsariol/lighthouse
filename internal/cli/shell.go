@@ -25,6 +25,7 @@ type Options struct {
 type CLI struct {
 	svc    control.Service
 	prompt string
+	env    string
 
 	scanner     *bufio.Scanner
 	term        *term.Terminal
@@ -41,6 +42,7 @@ func New(svc control.Service, opts Options) *CLI {
 	c := &CLI{
 		svc:         svc,
 		prompt:      promptFor(opts.Env),
+		env:         envLabel(opts.Env),
 		scanner:     bufio.NewScanner(os.Stdin),
 		interactive: term.IsTerminal(int(os.Stdin.Fd())),
 		embedded:    opts.Embedded,
@@ -122,9 +124,14 @@ func report(err error) {
 
 // askLine asks question and returns the answer, trimmed.
 func (c *CLI) askLine(question string) (answer string, answered bool) {
+	return c.askText(questionText("", question))
+}
+
+// askText shows text, an already formatted question, and returns the answer.
+func (c *CLI) askText(text string) (answer string, answered bool) {
 	switch {
 	case c.term != nil:
-		c.term.SetPrompt(colorize(yellow, "? "+question) + " ")
+		c.term.SetPrompt(text + " ")
 		line, err := c.term.ReadLine()
 		c.term.SetPrompt(c.prompt)
 		if err != nil {
@@ -132,7 +139,7 @@ func (c *CLI) askLine(question string) (answer string, answered bool) {
 		}
 		answer = line
 	case c.interactive:
-		ask(question)
+		ask(text)
 		if !c.scanner.Scan() {
 			fmt.Fprintln(stderr)
 			return "", false
@@ -144,9 +151,9 @@ func (c *CLI) askLine(question string) (answer string, answered bool) {
 	return strings.TrimSpace(answer), true
 }
 
-// confirm asks a yes/no question; Enter means no.
+// confirm asks a yes/no question, showing the environment; Enter means no.
 func (c *CLI) confirm(question string) (yes bool, answered bool) {
-	answer, answered := c.askLine(question + " (y/N)")
+	answer, answered := c.askText(questionText(c.env, question+" (y/N)"))
 	answer = strings.ToLower(answer)
 	return answer == "y" || answer == "yes", answered
 }

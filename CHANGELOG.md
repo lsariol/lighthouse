@@ -17,6 +17,7 @@ Lighthouse's own update can carry secrets, exceptions in `policy.json` grant les
 - **A host mount says how it may be mounted:** an allowed mount ends in `:ro` (read-only only) or `:rw` (either way), and a finding's ID carries the mount's mode, as in `mount:/proc/1/net/dev:ro`. A read-write mount under a read-only exception is refused with a hint. `:ro` on a socket is refused when `policy.json` loads, since a socket mounted read-only still takes every request.
 - **The migrator's database URL is `LIGHTHOUSE_DATABASE_MIGRATOR_URL`** (it was `LIGHTHOUSE_MIGRATOR_DATABASE_URL`), so the three connection strings read `LIGHTHOUSE_DATABASE_URL`, `LIGHTHOUSE_DATABASE_MIGRATOR_URL` and `LIGHTHOUSE_DATABASE_READER_URL`. Create the new key in Cove before deploying this version.
 - **The README covers setup:** the server, the database, Cove, adding a project and the rules it follows, publishing Releases, and configuration. The project is published under the MIT license.
+- **A confirmation shows the environment:** questions such as `remove`'s read `? (prod) Stop watching "plop", and stop and remove its containers? (y/N)`, with `(prod)` in red, since the question replaces the prompt that showed it.
 - **At most 10 database connections:** Lighthouse's pool is capped at 10, unless `LIGHTHOUSE_DATABASE_URL` sets `pool_max_conns`. It used to open one per CPU, at least 4, on a Postgres server every project shares.
 - **Go 1.27.4:** picks up the standard library's security fixes.
 

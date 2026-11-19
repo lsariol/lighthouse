@@ -66,22 +66,37 @@ func info(msg string) {
 
 // ask shows a question and leaves the cursor after it for the answer.
 func ask(question string) {
-	fmt.Fprint(stderr, colorize(yellow, "? "+question)+" ")
+	fmt.Fprint(stderr, question+" ")
+}
+
+// questionText is "? question", with label (the environment) after the "?".
+func questionText(label, question string) string {
+	if label == "" {
+		return colorize(yellow, "? "+question)
+	}
+	return colorize(yellow, "?") + " " + label + " " + colorize(yellow, question)
 }
 
 // promptFor returns the prompt for an environment such as "dev" or "prod":
 // "lighthouse (dev)> ".
 func promptFor(env string) string {
+	if label := envLabel(env); label != "" {
+		return "lighthouse " + label + "> "
+	}
+	return "lighthouse> "
+}
+
+// envLabel is "(dev)" or a red "(prod)", or "" with no environment.
+func envLabel(env string) string {
 	env = strings.ToLower(strings.TrimSpace(env))
 	if env == "" {
-		return "lighthouse> "
+		return ""
 	}
-
 	label := "(" + env + ")"
 	if env == "prod" || env == "production" {
 		label = colorize(red, label)
 	}
-	return "lighthouse " + label + "> "
+	return label
 }
 
 // table writes rows as aligned columns to stdout.
