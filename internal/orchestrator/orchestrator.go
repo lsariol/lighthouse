@@ -833,6 +833,11 @@ func (o *Orchestrator) deploy(ctx context.Context, p projects.Project, t target,
 	} else if errors.Is(err, projects.ErrNotFound) {
 		return nil
 	}
+	// A check that waited behind a deploy by hand may have nothing left to do.
+	if trigger == projects.TriggerCheck && (p.Stopped || p.DeployedSHA == t.sha && p.DeployedVersion == t.version) {
+		o.log.Info("not deploying: already running, or stopped while waiting", "project", p.Name, "what", t.String())
+		return nil
+	}
 
 	started := o.now()
 	res := o.deployer.Deploy(ctx, deploy.Request{

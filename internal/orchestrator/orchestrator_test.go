@@ -939,6 +939,45 @@ func TestStoppedProjectsAreLeftAlone(t *testing.T) {
 	}
 }
 
+// A scan during a deploy by hand of a stopped project waits for its turn,
+// then finds the commit already running and doesn't deploy it again.
+func TestNoSecondDeployAfterADeployByHand(t *testing.T) {
+	gh := newGitHub(map[string]string{"a": "aaa"})
+	o, store, d, _ := setup(t, gh, "a")
+	ctx := context.Background()
+	store.SetStopped(ctx, "a", true)
+
+	started, finish := make(chan struct{}), make(chan struct{})
+	d.result = func(req deploy.Request) deploy.Result {
+		if req.Trigger == projects.TriggerManual {
+			close(started)
+			<-finish
+		}
+		return deploy.Result{Status: projects.StatusSucceeded, ComposeProject: "a"}
+	}
+
+	manual := make(chan error)
+	go func() { manual <- o.Deploy(ctx, "a", "") }()
+	<-started
+	scan := make(chan error)
+	go func() { scan <- o.Scan(ctx) }()
+	waitFor(t, &o.turn, 1)
+	close(finish)
+
+	if err := <-manual; err != nil {
+		t.Errorf("deploy: %v", err)
+	}
+	if err := <-scan; err != nil {
+		t.Errorf("scan: %v", err)
+	}
+	if d.list() != "a@aaa" {
+		t.Errorf("deployed %s, want a@aaa once", d.list())
+	}
+	if h, _ := store.History(ctx, "a", 10); len(h) != 1 || h[0].Trigger != projects.TriggerManual {
+		t.Errorf("history = %+v, want one manual deploy", h)
+	}
+}
+
 // fakeContainers answers the reconcile loop.
 type fakeContainers struct {
 	byProject map[string][]docker.Container
