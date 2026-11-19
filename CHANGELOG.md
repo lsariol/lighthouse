@@ -2,6 +2,26 @@
 
 All notable changes to Lighthouse. Versions follow [semantic versioning](https://semver.org).
 
+## v1.5.0 (2026-11-19)
+
+Lighthouse's own update can carry secrets, exceptions in `policy.json` grant less, and `check` can try a project before its first release.
+
+### Added
+- **Lighthouse's own update carries secrets:** the `${KEY}`s of Lighthouse's compose file are fetched from Cove as for any project and handed to the update helper in its environment, never on disk; the hand-off file names them only. The helper also gets the previous version's, so a rollback starts that version with its own. If those can't be fetched, the update waits and is tried again. After a successful update the helper's container is removed, so it doesn't keep the values.
+- **`check <name> <tag or commit>`** checks that release or commit, as `deploy` takes one.
+- **`check` before the first release:** a project that deploys releases but has no version tag yet is checked at its newest commit, with a note saying so, instead of answering "has no releases yet".
+- `policy.json`: Sonar's gateway (`sonar-proxy`) may mount the data folders read-only with `CAP_DAC_READ_SEARCH`, to size each project's folder, and Sonar's agent may read the host's network counters, the one file `/proc/1/net/dev`, read-only.
+
+### Changed
+- **An exception covers one service:** every exception in `policy.json` must name its `service`, so a service added to a project later gets nothing by accident. A finding that belongs to the whole project, such as another project's network, can't be allowed.
+- **A host mount says how it may be mounted:** an allowed mount ends in `:ro` (read-only only) or `:rw` (either way), and a finding's ID carries the mount's mode, as in `mount:/proc/1/net/dev:ro`. A read-write mount under a read-only exception is refused with a hint. `:ro` on a socket is refused when `policy.json` loads, since a socket mounted read-only still takes every request.
+- **The migrator's database URL is `LIGHTHOUSE_DATABASE_MIGRATOR_URL`** (it was `LIGHTHOUSE_MIGRATOR_DATABASE_URL`), so the three connection strings read `LIGHTHOUSE_DATABASE_URL`, `LIGHTHOUSE_DATABASE_MIGRATOR_URL` and `LIGHTHOUSE_DATABASE_READER_URL`. Create the new key in Cove before deploying this version.
+- **The README covers setup:** the server, the database, Cove, adding a project and the rules it follows, publishing Releases, and configuration. The project is published under the MIT license.
+- **Go 1.27.4:** picks up the standard library's security fixes.
+
+### Fixed
+- **A deploy by hand of a stopped project ran twice:** a check that started while the deploy was in progress waited for its turn, then deployed the same commit again. It now sees the commit is already running and leaves it.
+
 ## v1.4.0 (2026-11-02)
 
 Lighthouse's logs follow Spark's logging standard, so Blackbox can read their levels and fields, and labels may be written as a list.
