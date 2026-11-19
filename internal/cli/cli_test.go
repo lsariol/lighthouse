@@ -66,8 +66,8 @@ func (f *fakeService) Remove(ctx context.Context, name string, down bool) error 
 	}
 	return f.act("remove", name)
 }
-func (f *fakeService) Check(ctx context.Context, name string) (control.Deployment, error) {
-	if err := f.act("check", name); err != nil {
+func (f *fakeService) Check(ctx context.Context, name string, ref string) (control.Deployment, error) {
+	if err := f.act(strings.TrimSpace("check "+ref), name); err != nil {
 		return control.Deployment{}, err
 	}
 	now := time.Now()
@@ -76,6 +76,12 @@ func (f *fakeService) Check(ctx context.Context, name string) (control.Deploymen
 	if name == "bad" {
 		d.Status, d.FailedStep, d.FailureKind, d.Error = "failed", "check", "permanent", "check: the compose file breaks the deploy rules (privileged)"
 		d.Steps[0] = control.Step{Name: "check", Status: "failed", Log: "✗ web: privileged: true gives the container root on the host [privileged]"}
+	}
+	if name == "new" {
+		d.Note = "new has no releases yet, so this checks the newest commit on its default branch"
+	}
+	if ref != "" {
+		d.Version = ref
 	}
 	return d, nil
 }
@@ -714,9 +720,23 @@ func TestCheck(t *testing.T) {
 		t.Errorf("check bad: %v\n%s", err, out)
 	}
 
+	_, errOut, err = run(t, newFake("new"), "check new")
+	if err != nil || !strings.Contains(errOut, "! new has no releases yet") || !strings.Contains(errOut, "abcdef1 would deploy") {
+		t.Errorf("check new: %v\n%s", err, errOut)
+	}
+
+	svc := newFake("plop")
+	_, errOut, err = run(t, svc, "check plop v1.4.0")
+	if err != nil || strings.Join(svc.calls, ",") != "check v1.4.0 plop" || !strings.Contains(errOut, "v1.4.0 (abcdef1) would deploy") {
+		t.Errorf("check plop v1.4.0: %v, calls %v\n%s", err, svc.calls, errOut)
+	}
+
 	var usage usageError
 	if _, _, err := run(t, newFake("plop"), "check"); !errors.As(err, &usage) {
 		t.Errorf("check without a name = %v, want a usage error", err)
+	}
+	if _, _, err := run(t, newFake("plop"), "check plop v1 extra"); !errors.As(err, &usage) {
+		t.Errorf("check with three arguments = %v, want a usage error", err)
 	}
 	if out, _, err := run(t, newFake(), "help rules"); err != nil || !strings.Contains(out, "policy.json") {
 		t.Errorf("help rules: %v\n%s", err, out)

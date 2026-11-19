@@ -726,7 +726,7 @@ func (o *Orchestrator) manualTarget(ctx context.Context, p projects.Project, ref
 	if ref == "" {
 		newest, _, found := release.Newest(tags)
 		if !found {
-			return target{}, fmt.Errorf("%s has no releases yet (tags such as v1.0.0)", p.Repo)
+			return target{}, fmt.Errorf("%s has %w", p.Repo, ErrNoReleases)
 		}
 		return target{sha: newest.SHA, version: newest.Name}, nil
 	}
@@ -747,15 +747,36 @@ func (o *Orchestrator) manualTarget(ctx context.Context, p projects.Project, ref
 // commitRef is a commit's full or short SHA.
 var commitRef = regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
 
-// Check dry-runs the deploy's checks on the project's newest commit.
-func (o *Orchestrator) Check(ctx context.Context, name string) (deploy.Result, string, error) {
+// ErrNoReleases means a project that deploys releases has no version tag yet.
+var ErrNoReleases = errors.New("no releases yet (tags such as v1.0.0)")
+
+// Checked is what a check ran on, and why, when it isn't what was asked for.
+type Checked struct {
+	SHA     string
+	Version string
+	Note    string
+}
+
+// Check dry-runs the deploy's checks on ref (a tag or a commit), or on what
+// a deploy would take: the newest release, or the newest commit before the
+// first release exists.
+func (o *Orchestrator) Check(ctx context.Context, name string, ref string) (deploy.Result, Checked, error) {
 	p, err := deployable(o.store.Get(ctx, name))
 	if err != nil {
-		return deploy.Result{}, "", err
+		return deploy.Result{}, Checked{}, err
 	}
-	t, err := o.manualTarget(ctx, p, "")
+	var note string
+	t, err := o.manualTarget(ctx, p, ref)
+	if ref == "" && errors.Is(err, ErrNoReleases) {
+		head, headErr := o.github.LatestCommit(ctx, p.Repo, o.gitToken)
+		if headErr != nil {
+			return deploy.Result{}, Checked{}, headErr
+		}
+		t, err = target{sha: head}, nil
+		note = fmt.Sprintf("%s has no releases yet, so this checks the newest commit on its default branch", p.Name)
+	}
 	if err != nil {
-		return deploy.Result{}, "", err
+		return deploy.Result{}, Checked{}, err
 	}
 	res := o.deployer.Check(ctx, deploy.Request{
 		Project: p,
@@ -775,7 +796,7 @@ func (o *Orchestrator) Check(ctx context.Context, name string) (deploy.Result, s
 			return nil
 		},
 	})
-	return res, t.sha, nil
+	return res, Checked{SHA: t.sha, Version: t.version, Note: note}, nil
 }
 
 // Retry clears a project's failures (and broken state) and deploys it now.

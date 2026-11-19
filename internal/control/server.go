@@ -92,7 +92,13 @@ func Handler(svc Service, log *slog.Logger) http.Handler {
 		respond(w, to, err)
 	})
 	mux.HandleFunc("POST /v1/projects/{name}/check", func(w http.ResponseWriter, r *http.Request) {
-		result, err := svc.Check(r.Context(), r.PathValue("name"))
+		var body struct {
+			Ref string `json:"ref"`
+		}
+		if !decode(w, r, &body) {
+			return
+		}
+		result, err := svc.Check(r.Context(), r.PathValue("name"), body.Ref)
 		respond(w, result, err)
 	})
 	mux.HandleFunc("GET /v1/projects/{name}/report", func(w http.ResponseWriter, r *http.Request) {

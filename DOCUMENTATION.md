@@ -546,7 +546,7 @@ A port published on every interface (`"2400:2400"`) is only a warning: anything 
 }
 ```
 
-A finding that belongs to the project rather than a service (another project's network or volume) can only be allowed by an exception without `service`. An exception naming a service the compose file doesn't have is a warning at the `check` step, so a misspelling doesn't quietly allow nothing. A finding an exception allows is still shown, marked `allowed by policy.json: <reason>`. A malformed `policy.json` (an unknown field, an exception without a reason, `"*"`) fails Lighthouse's tests and its startup. `lh check <name>` runs a project's latest commit through the rules and its test stage without deploying it; `lh help rules` is the short version of this section.
+A finding that belongs to the project rather than a service (another project's network or volume) can only be allowed by an exception without `service`. An exception naming a service the compose file doesn't have is a warning at the `check` step, so a misspelling doesn't quietly allow nothing. A finding an exception allows is still shown, marked `allowed by policy.json: <reason>`. A malformed `policy.json` (an unknown field, an exception without a reason, `"*"`) fails Lighthouse's tests and its startup. `lh check <name> [<tag or commit>]` runs what a deploy would take (or that tag or commit) through the rules and its test stage without deploying it; `lh help rules` is the short version of this section.
 
 ### 7.2 Lighthouse settings (`x-lighthouse`)
 
@@ -643,7 +643,7 @@ Lighthouse's CLI follows the server's CLI conventions (clig.dev; modelled on Cov
 | `retry` | `retry <name>` | Clear a broken project's failures and deploy it now |
 | `history` | `history <name> [count]` | The last deploys (10, up to 100), newest first: #, when, trigger, result (`succeeded`, `failed at <step>`, `rolled back at <step>`), commit, duration, the error's first line |
 | `rollback` | `rollback <name>` | Deploy again what ran before the current version (the newest earlier successful deploy), for a version that came up healthy but is wrong. Checks don't redeploy what it went back from |
-| `check` | `check <name>` | Run the latest commit through the deploy's checks (the rules and the test stage) without deploying or recording it; exits non-zero if a deploy would be refused |
+| `check` | `check <name> [<tag or commit>]` | Run what a deploy would take (the newest release, or the newest commit), or the given tag or commit, through the deploy's checks (the rules and the test stage) without deploying or recording it; exits non-zero if a deploy would be refused. A project that deploys releases but has none yet is checked at its newest commit, so its first release can be checked before it's tagged |
 | `report` | `report <name> [n]` | One deploy (1 = the latest): commit, start, result and its kind, then each step with its status, duration and output |
 | `scan` | `scan` | Check every project now and deploy new commits; refused while another scan runs |
 | `pause` / `resume` | `pause [all]` | Stop / restart all automatic work, for every project: the checks and the reconcile loop. `deploy`, `rollback` and `scan` still work. A restart of Lighthouse, or a self-update, resumes |

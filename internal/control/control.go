@@ -34,7 +34,7 @@ type Service interface {
 	// Check runs the project's latest commit through the deploy's checks
 	// (the rules and the test stage) without deploying it. The result, with
 	// its steps, isn't recorded in the history.
-	Check(ctx context.Context, name string) (Deployment, error)
+	Check(ctx context.Context, name string, ref string) (Deployment, error)
 	// Retry clears a project's failures and broken state, and deploys it.
 	Retry(ctx context.Context, name string) error
 	Scan(ctx context.Context) error
@@ -145,6 +145,7 @@ type Deployment struct {
 	FinishedAt  time.Time `json:"finishedAt"`
 	Error       string    `json:"error,omitempty"`
 	Steps       []Step    `json:"steps,omitempty"`
+	Note        string    `json:"note,omitempty"` // a check: why it ran on something else than asked
 }
 
 // Step is one step of a deployment.

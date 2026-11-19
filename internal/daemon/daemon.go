@@ -497,9 +497,9 @@ func (d *Daemon) Retry(ctx context.Context, name string) error {
 	return deployError(name, o.Retry(ctx, name))
 }
 
-// Check runs a project's latest commit through the deploy's checks without
-// deploying it.
-func (d *Daemon) Check(ctx context.Context, name string) (control.Deployment, error) {
+// Check runs ref, or what a deploy would take, through the deploy's checks
+// without deploying it.
+func (d *Daemon) Check(ctx context.Context, name string, ref string) (control.Deployment, error) {
 	_, o, err := d.parts()
 	if err != nil {
 		return control.Deployment{}, err
@@ -509,7 +509,7 @@ func (d *Daemon) Check(ctx context.Context, name string) (control.Deployment, er
 		return control.Deployment{}, err
 	}
 	started := time.Now()
-	res, sha, err := o.Check(ctx, p.Name)
+	res, checked, err := o.Check(ctx, p.Name, ref)
 	if errors.Is(err, orchestrator.ErrPublishOnly) {
 		return control.Deployment{}, publishOnlyError(p.Name)
 	}
@@ -518,7 +518,8 @@ func (d *Daemon) Check(ctx context.Context, name string) (control.Deployment, er
 	}
 
 	out := control.Deployment{
-		Commit: sha, Trigger: "dry run", Status: res.Status, FailureKind: res.FailureKind, FailedStep: res.FailedStep,
+		Commit: checked.SHA, Version: checked.Version, Note: checked.Note,
+		Trigger: "dry run", Status: res.Status, FailureKind: res.FailureKind, FailedStep: res.FailedStep,
 		StartedAt: started, FinishedAt: time.Now(),
 	}
 	if res.Err != nil {

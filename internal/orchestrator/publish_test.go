@@ -237,7 +237,7 @@ func TestPublishOnly(t *testing.T) {
 	if err := o.Retry(ctx, "coveclient"); !errors.Is(err, ErrPublishOnly) {
 		t.Errorf("Retry = %v", err)
 	}
-	if _, _, err := o.Check(ctx, "coveclient"); !errors.Is(err, ErrPublishOnly) {
+	if _, _, err := o.Check(ctx, "coveclient", ""); !errors.Is(err, ErrPublishOnly) {
 		t.Errorf("Check = %v", err)
 	}
 	if r, err := o.Backfill(ctx, "coveclient", "v0.9.0", "", ""); err != nil || r.Status != projects.ReleasePublished {

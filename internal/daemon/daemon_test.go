@@ -194,7 +194,7 @@ func TestPublishOnlyProject(t *testing.T) {
 		"retry":    d.Retry(ctx, "coveclient"),
 		"restart":  d.Restart(ctx, "coveclient"),
 		"rollback": func() error { _, err := d.Rollback(ctx, "coveclient"); return err }(),
-		"check":    func() error { _, err := d.Check(ctx, "coveclient"); return err }(),
+		"check":    func() error { _, err := d.Check(ctx, "coveclient", ""); return err }(),
 		"logs":     func() error { _, err := d.Logs(ctx, "coveclient", 10); return err }(),
 	} {
 		if kind(err) != control.KindInvalid || !strings.Contains(err.Error(), "publish-only") {
@@ -432,7 +432,7 @@ func TestCheck(t *testing.T) {
 	d, _, _, store := newDaemon(t)
 	ctx := context.Background()
 
-	r, err := d.Check(ctx, "PERSONALWEBSITE")
+	r, err := d.Check(ctx, "PERSONALWEBSITE", "")
 	if err != nil || r.Commit != "abc" || r.FailedStep != "check" || !strings.Contains(r.Error, "privileged") ||
 		len(r.Steps) != 1 || r.Steps[0].Log != "✗ web: privileged: true" {
 		t.Errorf("Check = %+v, %v", r, err)
@@ -440,7 +440,7 @@ func TestCheck(t *testing.T) {
 	if h, _ := store.History(ctx, "personalWebsite", 10); len(h) != 0 {
 		t.Error("a check was recorded as a deploy")
 	}
-	if _, err := d.Check(ctx, "nope"); kind(err) != control.KindNotFound {
+	if _, err := d.Check(ctx, "nope", ""); kind(err) != control.KindNotFound {
 		t.Errorf("Check of an unknown project = %v", err)
 	}
 }

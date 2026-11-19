@@ -131,9 +131,9 @@ func (c *Client) Retry(ctx context.Context, name string) error {
 	return c.call(ctx, http.MethodPost, project(name)+"/retry", nil, nil)
 }
 
-func (c *Client) Check(ctx context.Context, name string) (Deployment, error) {
+func (c *Client) Check(ctx context.Context, name string, ref string) (Deployment, error) {
 	var d Deployment
-	err := c.call(ctx, http.MethodPost, project(name)+"/check", nil, &d)
+	err := c.call(ctx, http.MethodPost, project(name)+"/check", map[string]string{"ref": ref}, &d)
 	return d, err
 }
 

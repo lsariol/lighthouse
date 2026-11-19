@@ -224,20 +224,28 @@ func (c *CLI) report(ctx context.Context, args []string) error {
 }
 
 func (c *CLI) check(ctx context.Context, args []string) error {
-	if len(args) != 2 {
-		return usageError{form: "check <name>"}
+	if len(args) < 2 || len(args) > 3 {
+		return usageError{form: "check <name> [<tag or commit>]"}
 	}
-	name := args[1]
-	info(fmt.Sprintf("Checking %q: downloading its latest commit and running the deploy's checks. Nothing is deployed.", name))
-	d, err := c.svc.Check(ctx, name)
+	name, ref, what := args[1], "", "what a deploy would take"
+	if len(args) == 3 {
+		ref = args[2]
+		what = fmt.Sprintf("%q", ref)
+	}
+	info(fmt.Sprintf("Checking %q: downloading %s and running the deploy's checks. Nothing is deployed.", name, what))
+	d, err := c.svc.Check(ctx, name, ref)
 	if err != nil {
 		return err
 	}
-	printDeployment(d)
-	if d.Status != "succeeded" {
-		return fmt.Errorf("%q wouldn't deploy: it fails at %s. The step's output above says why; \"help rules\" lists the rules.", name, d.FailedStep)
+	if d.Note != "" {
+		warn(d.Note + ".")
 	}
-	success(fmt.Sprintf("%q passes the checks: its latest commit would deploy.", name))
+	printDeployment(d)
+	checked := deployed(d.Version, d.Commit)
+	if d.Status != "succeeded" {
+		return fmt.Errorf("%q wouldn't deploy %s: it fails at %s. The step's output above says why; \"help rules\" lists the rules.", name, checked, d.FailedStep)
+	}
+	success(fmt.Sprintf("%q passes the checks: %s would deploy.", name, checked))
 	return nil
 }
 

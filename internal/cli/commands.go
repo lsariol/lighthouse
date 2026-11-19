@@ -271,13 +271,16 @@ func commandTable(embedded bool) []command {
 		{
 			names:    []string{"check"},
 			group:    groupDeploying,
-			synopsis: "<name>",
+			synopsis: "<name> [<tag or commit>]",
 			summary:  "Run the deploy's checks without deploying",
 			usages: []usage{
-				{"check <name>", "Download the latest commit and run it through the deploy rules and its Dockerfile's test stage, as a deploy would, without deploying it or recording it. Exits non-zero if a deploy would be refused. The rules: \"help rules\"."},
+				{"check <name>", "Download what a deploy would take (the newest release, or the newest commit for a project that deploys its branch) and run it through the deploy rules and its Dockerfile's test stage, without deploying it or recording it. A project that deploys releases but has none yet is checked at its newest commit, so its first release can be checked before it's tagged. Exits non-zero if a deploy would be refused. The rules: \"help rules\"."},
+				{"check <name> <tag or commit>", "Check that release (v1.2.3) or commit (7 to 40 hex characters) instead."},
 			},
 			examples: []example{
 				{"check plop", "would plop's latest commit deploy?"},
+				{"check blackbox", "before tagging its first release"},
+				{"check plop v1.4.0", "one release"},
 			},
 			run:      (*CLI).check,
 			complete: names,

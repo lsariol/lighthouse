@@ -668,6 +668,24 @@ func TestSettingsComeFromTheBranch(t *testing.T) {
 	}
 }
 
+func TestCheckARelease(t *testing.T) {
+	gh := newGitHub(map[string]string{"cove": "head1"})
+	gh.repos["cove"].compose = releases("infra")
+	gh.repos["cove"].tags = []github.Tag{{Name: "v1.0.0", SHA: "s100"}, {Name: "v1.1.0", SHA: "s110"}}
+	o, _, d, _ := setup(t, gh, "cove")
+	ctx := context.Background()
+
+	if _, checked, err := o.Check(ctx, "cove", ""); err != nil || checked != (Checked{SHA: "s110", Version: "v1.1.0"}) {
+		t.Errorf("Check of the newest release = %+v, %v", checked, err)
+	}
+	if _, checked, err := o.Check(ctx, "cove", "v1.0.0"); err != nil || checked != (Checked{SHA: "s100", Version: "v1.0.0"}) {
+		t.Errorf("Check of v1.0.0 = %+v, %v", checked, err)
+	}
+	if d.count() != 0 || strings.Join(d.checked, ",") != "cove@s110,cove@s100" {
+		t.Errorf("deployed %s, checked %v", d.list(), d.checked)
+	}
+}
+
 func TestReleaseModeWithoutReleases(t *testing.T) {
 	gh := newGitHub(map[string]string{"cove": "head1"})
 	gh.repos["cove"].compose = releases("app")
@@ -680,6 +698,15 @@ func TestReleaseModeWithoutReleases(t *testing.T) {
 	}
 	if err := o.Deploy(context.Background(), "cove", ""); err == nil || !strings.Contains(err.Error(), "no releases yet") {
 		t.Errorf("Deploy = %v", err)
+	}
+
+	// A check falls back to the newest commit, so a first release can be checked before it's tagged.
+	_, checked, err := o.Check(context.Background(), "cove", "")
+	if err != nil || checked.SHA != "head1" || checked.Version != "" || !strings.Contains(checked.Note, "no releases yet") {
+		t.Errorf("Check = %+v, %v", checked, err)
+	}
+	if _, _, err := o.Check(context.Background(), "cove", "v9.9.9"); err == nil || !strings.Contains(err.Error(), `no tag "v9.9.9"`) {
+		t.Errorf("Check of a missing tag = %v", err)
 	}
 }
 
@@ -1079,9 +1106,9 @@ func TestCheck(t *testing.T) {
 	d := &fakeDeployer{}
 	o := New(store, newGitHub(map[string]string{"site": "aaa"}), d, nil, "t", nil)
 
-	res, sha, err := o.Check(ctx, "first")
-	if err != nil || sha != "aaa" || res.Status != projects.StatusSucceeded {
-		t.Fatalf("Check = %+v, %q, %v", res, sha, err)
+	res, checked, err := o.Check(ctx, "first", "")
+	if err != nil || checked.SHA != "aaa" || checked.Note != "" || res.Status != projects.StatusSucceeded {
+		t.Fatalf("Check = %+v, %+v, %v", res, checked, err)
 	}
 	if len(d.deployed) != 0 || get(t, store, "first").ComposeProject != "" {
 		t.Errorf("Check deployed %v or claimed %q", d.deployed, get(t, store, "first").ComposeProject)
@@ -1093,10 +1120,10 @@ func TestCheck(t *testing.T) {
 	if err := o.Deploy(ctx, "first", ""); err != nil {
 		t.Fatal(err)
 	}
-	if res, _, _ := o.Check(ctx, "second"); res.Err == nil || !strings.Contains(res.Err.Error(), "belongs to first") {
+	if res, _, _ := o.Check(ctx, "second", ""); res.Err == nil || !strings.Contains(res.Err.Error(), "belongs to first") {
 		t.Errorf("Check of a clashing project = %v", res.Err)
 	}
-	if res, _, _ := o.Check(ctx, "first"); res.Err != nil {
+	if res, _, _ := o.Check(ctx, "first", ""); res.Err != nil {
 		t.Errorf("Check of the project that has it = %v", res.Err)
 	}
 }
