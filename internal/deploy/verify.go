@@ -120,7 +120,10 @@ func (r *run) cleanup(ctx context.Context, project compose.Project, dir string, 
 		keep[short12(prev)] = true
 	}
 
-	entries, _ := os.ReadDir(filepath.Dir(dir))
+	entries, err := os.ReadDir(filepath.Dir(dir))
+	if err != nil {
+		fmt.Fprintf(out, "! list the old deploy folders: %v\n", err)
+	}
 	var removed []string
 	for _, e := range entries {
 		if e.IsDir() && !keep[e.Name()] {

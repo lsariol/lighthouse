@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -264,6 +265,19 @@ func TestHelperFailsToStart(t *testing.T) {
 	}
 	if ready, _ := e.d.HandOffs(); len(ready) != 0 {
 		t.Error("a hand-off was left behind")
+	}
+}
+
+func TestUnreadableHandOffsCountAsInProgress(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows reports a file read as a folder as missing")
+	}
+	e := newSelfEnv(t)
+	if err := os.WriteFile(filepath.Join(e.root, ".self-update"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !e.d.HandOffInProgress("plop") {
+		t.Error("an unreadable hand-off folder counts as no hand-off")
 	}
 }
 

@@ -970,7 +970,10 @@ func (o *Orchestrator) recordDeployment(ctx context.Context, d projects.Deployme
 
 // takenError names the project that has a compose project already.
 func (o *Orchestrator) takenError(ctx context.Context, composeProject string) error {
-	list, _ := o.store.List(ctx)
+	list, err := o.store.List(ctx)
+	if err != nil {
+		return fmt.Errorf("the compose project %q belongs to another project (which one is unknown: %v)", composeProject, err)
+	}
 	for _, other := range list {
 		if other.ComposeProject == composeProject {
 			return fmt.Errorf("the compose project %q belongs to %s already: two projects can't share one (change `name:` in one compose file)", composeProject, other.Name)

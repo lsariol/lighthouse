@@ -154,11 +154,13 @@ func (d *Daemon) Status(ctx context.Context) (control.Status, error) {
 	}
 	s.Projects = list
 	store, _, _ := d.parts()
-	if all, err := store.Releases(ctx, ""); err == nil {
-		for _, r := range all {
-			if r.Status == projects.ReleasePending {
-				s.Unpublished++
-			}
+	all, err := store.Releases(ctx, "")
+	if err != nil {
+		return s, err
+	}
+	for _, r := range all {
+		if r.Status == projects.ReleasePending {
+			s.Unpublished++
 		}
 	}
 	return s, nil
@@ -359,9 +361,12 @@ func (d *Daemon) Add(ctx context.Context, name string, url string, publishOnly b
 	p, err := add(ctx, name, repo)
 	switch {
 	case errors.Is(err, projects.ErrNameTaken) && !chosen:
-		other, _ := store.Get(ctx, name)
+		watching := ""
+		if other, err := store.Get(ctx, name); err == nil {
+			watching = fmt.Sprintf(" (watching %s)", other.Repo)
+		}
 		return control.Project{}, control.Errorf(control.KindNameTaken,
-			"A project named %q already exists (watching %s). Add this one under another name: add %s --name <name>", name, other.Repo, url)
+			"A project named %q already exists%s. Add this one under another name: add %s --name <name>", name, watching, url)
 	case errors.Is(err, projects.ErrNameTaken):
 		return control.Project{}, control.Errorf(control.KindNameTaken, "A project named %q already exists. Pick another name.", name)
 	case err != nil:

@@ -307,7 +307,12 @@ func (d *Deployer) HandOffs() ([]HandOff, error) {
 
 // HandOffInProgress reports whether the helper is still working on the project.
 func (d *Deployer) HandOffInProgress(project string) bool {
-	all, _ := d.handOffs()
+	all, err := d.handOffs()
+	if err != nil {
+		// Unknown counts as in progress: a deploy now could replace the helper's files.
+		d.log.Warn("self-update hand-offs can't be read, so deploys wait", "err", err)
+		return true
+	}
 	for _, h := range all {
 		if !h.Done && strings.EqualFold(h.Project.Name, project) && time.Since(h.StartedAt) < HandOffWait {
 			return true

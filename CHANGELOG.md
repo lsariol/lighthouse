@@ -22,6 +22,7 @@ Lighthouse's own update can carry secrets, exceptions in `policy.json` grant les
 - **Go 1.27.4:** picks up the standard library's security fixes.
 
 ### Fixed
+- **An unreadable self-update folder no longer lets deploys through:** if Lighthouse can't read its update helper's hand-off files, it can't tell whether the helper is mid-swap, so deploys now wait and a warning is logged, where they used to go ahead. A deploy that can't list its old deploy folders says so in its output instead of skipping the cleanup silently.
 - **A deploy by hand of a stopped project ran twice:** a check that started while the deploy was in progress waited for its turn, then deployed the same commit again. It now sees the commit is already running and leaves it.
 
 ## v1.4.0 (2026-11-02)

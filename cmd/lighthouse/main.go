@@ -216,7 +216,10 @@ func start(ctx context.Context, cfg config.Config, d *daemon.Daemon, dockerClien
 	orch.RecordHandOffs(ctx)
 	go orch.RunPublisher(ctx)
 
-	list, _ := db.List(ctx)
+	list, err := db.List(ctx)
+	if err != nil {
+		log.Warn("the projects can't be counted", "err", err)
+	}
 	log.Info("Lighthouse ready", "projects", len(list), "poll_interval", cfg.PollInterval.String(), "control_socket", cfg.ControlSocket)
 	return db, orch, nil
 }
