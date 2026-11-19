@@ -85,8 +85,8 @@ bootstrap open lighthouse
 ```bash
 git clone https://github.com/lsariol/lighthouse.git
 cd lighthouse
-git checkout v1.4.0      # the newest release
-LIGHTHOUSE_DEPLOY_VERSION=v1.4.0 docker compose up -d --build
+git checkout v1.5.0      # the newest release
+LIGHTHOUSE_DEPLOY_VERSION=v1.5.0 docker compose up -d --build
 docker logs -f lighthouse
 ```
 
